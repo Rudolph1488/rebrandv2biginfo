@@ -103,30 +103,30 @@ export default function CashflowClient({
       </div>
 
       {/* Summary Cards */}
-      <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs dark:border-white/10 dark:bg-[#0d1017] sm:p-5">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-4">
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-2xs dark:border-white/10 dark:bg-[#0d1017] sm:p-5">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 sm:text-[11px]">
             Надходження
           </p>
-          <p className="mt-2 text-2xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-            +{totalIncome.toFixed(2)} {currencySymbol}
+          <p className="mt-1 text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-400 sm:mt-2 sm:text-2xl">
+            +{totalIncome.toFixed(0)} {currencySymbol}
           </p>
         </div>
 
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs dark:border-white/10 dark:bg-[#0d1017] sm:p-5">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-2xs dark:border-white/10 dark:bg-[#0d1017] sm:p-5">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 sm:text-[11px]">
             Витрати
           </p>
-          <p className="mt-2 text-2xl font-bold tabular-nums text-rose-600 dark:text-rose-400">
-            -{totalExpense.toFixed(2)} {currencySymbol}
+          <p className="mt-1 text-lg font-bold tabular-nums text-rose-600 dark:text-rose-400 sm:mt-2 sm:text-2xl">
+            -{totalExpense.toFixed(0)} {currencySymbol}
           </p>
         </div>
 
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs dark:border-white/10 dark:bg-[#0d1017] sm:p-5">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+        <div className="col-span-2 rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-2xs dark:border-white/10 dark:bg-[#0d1017] sm:col-span-1 sm:p-5">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 sm:text-[11px]">
             Чистий баланс
           </p>
-          <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900 dark:text-white">
+          <p className="mt-1 text-xl font-bold tabular-nums text-slate-900 dark:text-white sm:mt-2 sm:text-2xl">
             {netBalance.toFixed(2)} {currencySymbol}
           </p>
         </div>

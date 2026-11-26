@@ -220,21 +220,21 @@ export default function ProductionClient({
       )}
 
       {/* KPI Strip */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <button
           type="button"
           onClick={() => setFilter('pending')}
-          className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-4 text-left shadow-2xs transition hover:border-amber-300 dark:border-white/10 dark:bg-[#0d1017]"
+          className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-2.5 text-left shadow-2xs transition hover:border-amber-300 dark:border-white/10 dark:bg-[#0d1017] sm:p-4"
         >
-          <div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              Нові заявки (очікують)
+          <div className="min-w-0">
+            <p className="truncate text-[10px] font-medium text-slate-500 dark:text-slate-400 sm:text-xs">
+              Очікують
             </p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-slate-900 dark:text-white">
+            <p className="mt-0.5 text-lg font-bold tabular-nums text-slate-900 dark:text-white sm:mt-1 sm:text-2xl">
               {counts.pending}
             </p>
           </div>
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">
+          <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400 sm:flex">
             <Clock className="h-5 w-5" />
           </div>
         </button>
@@ -242,17 +242,17 @@ export default function ProductionClient({
         <button
           type="button"
           onClick={() => setFilter('in_progress')}
-          className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-4 text-left shadow-2xs transition hover:border-indigo-300 dark:border-white/10 dark:bg-[#0d1017]"
+          className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-2.5 text-left shadow-2xs transition hover:border-indigo-300 dark:border-white/10 dark:bg-[#0d1017] sm:p-4"
         >
-          <div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              Прийнято в роботу
+          <div className="min-w-0">
+            <p className="truncate text-[10px] font-medium text-slate-500 dark:text-slate-400 sm:text-xs">
+              В роботі
             </p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-indigo-600 dark:text-indigo-400">
+            <p className="mt-0.5 text-lg font-bold tabular-nums text-indigo-600 dark:text-indigo-400 sm:mt-1 sm:text-2xl">
               {counts.inProgress}
             </p>
           </div>
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400">
+          <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400 sm:flex">
             <Play className="h-5 w-5" />
           </div>
         </button>
@@ -260,17 +260,17 @@ export default function ProductionClient({
         <button
           type="button"
           onClick={() => setFilter('done')}
-          className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-4 text-left shadow-2xs transition hover:border-emerald-300 dark:border-white/10 dark:bg-[#0d1017]"
+          className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-2.5 text-left shadow-2xs transition hover:border-emerald-300 dark:border-white/10 dark:bg-[#0d1017] sm:p-4"
         >
-          <div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+          <div className="min-w-0">
+            <p className="truncate text-[10px] font-medium text-slate-500 dark:text-slate-400 sm:text-xs">
               Вироблено
             </p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+            <p className="mt-0.5 text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-400 sm:mt-1 sm:text-2xl">
               {counts.done}
             </p>
           </div>
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
+          <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400 sm:flex">
             <CheckCircle2 className="h-5 w-5" />
           </div>
         </button>

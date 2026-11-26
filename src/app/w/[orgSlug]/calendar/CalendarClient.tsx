@@ -337,24 +337,24 @@ export default function CalendarClient({
       </div>
 
       {/* KPI Summary Strip */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <button
           type="button"
           onClick={jumpToToday}
-          className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-4 text-left shadow-2xs transition hover:border-indigo-300 dark:border-white/10 dark:bg-[#0d1017] dark:hover:border-indigo-500/40"
+          className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-2.5 text-left shadow-2xs transition hover:border-indigo-300 dark:border-white/10 dark:bg-[#0d1017] dark:hover:border-indigo-500/40 sm:p-4"
         >
-          <div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              Відвантажити сьогодні
+          <div className="min-w-0">
+            <p className="truncate text-[10px] font-medium text-slate-500 dark:text-slate-400 sm:text-xs">
+              Сьогодні
             </p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-slate-900 dark:text-white">
+            <p className="mt-0.5 text-lg font-bold tabular-nums text-slate-900 dark:text-white sm:mt-1 sm:text-2xl">
               {todayActiveOrders.length}
-              <span className="ml-2 text-xs font-medium text-slate-400">
+              <span className="ml-1 hidden text-xs font-medium text-slate-400 sm:inline">
                 (усього {todayOrders.length})
               </span>
             </p>
           </div>
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">
+          <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400 sm:flex">
             <Clock className="h-5 w-5" />
           </div>
         </button>
@@ -362,18 +362,18 @@ export default function CalendarClient({
         <button
           type="button"
           onClick={() => setActiveTab('overdue')}
-          className={`flex items-center justify-between rounded-2xl border p-4 text-left shadow-2xs transition ${
+          className={`flex items-center justify-between rounded-2xl border p-2.5 text-left shadow-2xs transition sm:p-4 ${
             overdueOrders.length > 0
               ? 'border-red-200 bg-red-50/50 hover:border-red-300 dark:border-red-500/30 dark:bg-red-500/10'
               : 'border-slate-200/80 bg-white hover:border-slate-300 dark:border-white/10 dark:bg-[#0d1017]'
           }`}
         >
-          <div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              Прострочені дедлайни
+          <div className="min-w-0">
+            <p className="truncate text-[10px] font-medium text-slate-500 dark:text-slate-400 sm:text-xs">
+              Прострочені
             </p>
             <p
-              className={`mt-1 text-2xl font-bold tabular-nums ${
+              className={`mt-0.5 text-lg font-bold tabular-nums sm:mt-1 sm:text-2xl ${
                 overdueOrders.length > 0
                   ? 'text-red-600 dark:text-red-400'
                   : 'text-slate-900 dark:text-white'
@@ -383,7 +383,7 @@ export default function CalendarClient({
             </p>
           </div>
           <div
-            className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+            className={`hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:flex ${
               overdueOrders.length > 0
                 ? 'bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400'
                 : 'bg-slate-100 text-slate-400 dark:bg-white/10'
@@ -393,16 +393,16 @@ export default function CalendarClient({
           </div>
         </button>
 
-        <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs dark:border-white/10 dark:bg-[#0d1017]">
-          <div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              Заплановано ({MONTH_NAMES[viewDate.getMonth()]})
+        <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-2.5 shadow-2xs dark:border-white/10 dark:bg-[#0d1017] sm:p-4">
+          <div className="min-w-0">
+            <p className="truncate text-[10px] font-medium text-slate-500 dark:text-slate-400 sm:text-xs">
+              {MONTH_NAMES[viewDate.getMonth()]}
             </p>
-            <p className="mt-1 text-2xl font-bold tabular-nums text-slate-900 dark:text-white">
+            <p className="mt-0.5 text-lg font-bold tabular-nums text-slate-900 dark:text-white sm:mt-1 sm:text-2xl">
               {monthCount}
             </p>
           </div>
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400">
+          <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400 sm:flex">
             <CalendarIcon className="h-5 w-5" />
           </div>
         </div>
