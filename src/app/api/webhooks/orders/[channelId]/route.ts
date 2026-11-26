@@ -211,7 +211,13 @@ function extractProductAttributes(
     }
   }
 
-  for (const field of ['options', 'variants', 'attributes', 'properties'] as const) {
+  for (const field of [
+    'option_values',
+    'options',
+    'variants',
+    'attributes',
+    'properties',
+  ] as const) {
     const raw = p[field];
     if (Array.isArray(raw)) {
       for (const opt of raw) {
