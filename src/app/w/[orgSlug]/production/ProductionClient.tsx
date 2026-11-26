@@ -117,14 +117,22 @@ export default function ProductionClient({
     setErrorMsg(null);
     const now = new Date().toISOString();
 
+    const inWorkStage =
+      statuses.find((s) => !s.is_final && /робот|виробницт/i.test(s.name)) ||
+      null;
+
     const patch: Record<string, unknown> = {
       production_status: nextStatus,
+      updated_at: now,
     };
 
     if (nextStatus === 'in_progress') {
       patch.production_accepted_by = currentUserId;
       patch.production_accepted_at = now;
       patch.production_completed_at = null;
+      if (inWorkStage) {
+        patch.status_id = inWorkStage.id;
+      }
     } else if (nextStatus === 'done') {
       patch.production_completed_at = now;
     } else {
@@ -149,6 +157,10 @@ export default function ProductionClient({
         o.id === orderId
           ? {
               ...o,
+              status_id:
+                nextStatus === 'in_progress' && inWorkStage
+                  ? inWorkStage.id
+                  : o.status_id,
               production_status: nextStatus,
               production_accepted_by:
                 nextStatus === 'in_progress'
