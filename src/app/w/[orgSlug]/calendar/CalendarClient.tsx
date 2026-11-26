@@ -428,12 +428,12 @@ export default function CalendarClient({
       )}
 
       {/* Main Calendar + Day Agenda */}
-      <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
         {/* Month Grid */}
-        <div className="rounded-3xl border border-slate-200/80 bg-white p-4 shadow-xs dark:border-white/10 dark:bg-[#0d1017] sm:p-5">
+        <div className="min-w-0 rounded-3xl border border-slate-200/80 bg-white p-3 shadow-xs dark:border-white/10 dark:bg-[#0d1017] sm:p-5">
           {/* Month Nav */}
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-bold text-slate-900 dark:text-white sm:text-lg">
               {MONTH_NAMES[viewDate.getMonth()]} {viewDate.getFullYear()}
             </h2>
             <div className="flex items-center gap-1.5">
@@ -464,14 +464,14 @@ export default function CalendarClient({
           </div>
 
           {/* Weekday Headers */}
-          <div className="grid grid-cols-7 gap-1 pb-2 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+          <div className="grid grid-cols-7 gap-0.5 pb-2 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-400 sm:gap-1.5 sm:text-[11px]">
             {WEEKDAYS.map((day) => (
               <div key={day}>{day}</div>
             ))}
           </div>
 
           {/* Days Grid */}
-          <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
+          <div className="grid grid-cols-7 gap-0.5 sm:gap-1.5">
             {calendarDays.map((cell) => {
               const dayOrders = ordersByDate.get(cell.dateKey) || [];
               const isToday = cell.dateKey === todayKey;
@@ -507,7 +507,7 @@ export default function CalendarClient({
                       setDraggedOrderId(null);
                     }
                   }}
-                  className={`group min-h-[68px] cursor-pointer rounded-xl border p-1.5 transition sm:min-h-[104px] sm:p-2 ${
+                  className={`group flex min-h-[50px] min-w-0 cursor-pointer flex-col items-center justify-between rounded-lg border p-1 transition sm:block sm:min-h-[104px] sm:rounded-xl sm:p-2 ${
                     dragOverDate === cell.dateKey
                       ? 'border-dashed border-indigo-500 bg-indigo-50/80 ring-2 ring-indigo-500/40 dark:border-indigo-400 dark:bg-indigo-500/20'
                       : isSelected
@@ -517,9 +517,9 @@ export default function CalendarClient({
                           : 'border-slate-100 bg-slate-50/40 hover:border-slate-300 dark:border-white/5 dark:bg-white/[0.02] dark:hover:border-white/20'
                   } ${!cell.inCurrentMonth ? 'opacity-45' : ''}`}
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex w-full items-center justify-center sm:justify-between">
                     <span
-                      className={`inline-flex h-6 w-6 items-center justify-center rounded-lg text-xs font-bold tabular-nums ${
+                      className={`inline-flex h-6 w-6 items-center justify-center rounded-lg text-[11px] font-bold tabular-nums sm:text-xs ${
                         isToday
                           ? 'bg-amber-500 text-white'
                           : isSelected
@@ -529,18 +529,18 @@ export default function CalendarClient({
                     >
                       {cell.dayNum}
                     </span>
-                    {dayOrders.length > 0 && (
-                      <span
-                        className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums sm:hidden ${
-                          hasOverdue
-                            ? 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'
-                            : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300'
-                        }`}
-                      >
-                        {dayOrders.length}
-                      </span>
-                    )}
                   </div>
+                  {dayOrders.length > 0 && (
+                    <span
+                      className={`mt-0.5 rounded-full px-1.5 py-0.2 text-[9px] font-bold tabular-nums sm:hidden ${
+                        hasOverdue
+                          ? 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'
+                          : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300'
+                      }`}
+                    >
+                      {dayOrders.length}
+                    </span>
+                  )}
 
                   {/* Desktop order chips */}
                   <div className="mt-1.5 hidden space-y-1 sm:block">
@@ -594,7 +594,7 @@ export default function CalendarClient({
         </div>
 
         {/* Right Side Agenda Panel */}
-        <div className="flex flex-col rounded-3xl border border-slate-200/80 bg-white p-5 shadow-xs dark:border-white/10 dark:bg-[#0d1017]">
+        <div className="flex min-w-0 flex-col rounded-3xl border border-slate-200/80 bg-white p-4 shadow-xs dark:border-white/10 dark:bg-[#0d1017] sm:p-5">
           {/* Tabs */}
           <div className="flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-white/5">
             <button
