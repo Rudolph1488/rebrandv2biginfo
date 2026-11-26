@@ -11,6 +11,8 @@ import type {
 
 const PAGE_SIZE = 50;
 
+export const dynamic = 'force-dynamic';
+
 export default async function OrdersPage({
   params,
   searchParams,
@@ -120,7 +122,7 @@ export default async function OrdersPage({
 
   return (
     <OrdersClient
-      key={`${currentPage}-${cleanQ}`}
+      key={`${currentPage}-${cleanQ}-${normalizedOrders[0]?.id || 'empty'}-${normalizedOrders.length}-${statusesRes.data?.length || 0}`}
       org={org}
       statuses={(statusesRes.data || []) as OrderStatus[]}
       initialOrders={normalizedOrders}

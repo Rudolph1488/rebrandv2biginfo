@@ -613,9 +613,20 @@ export default function OrdersClient({
       {/* DESKTOP KANBAN / LIST */}
       <div className="hidden md:block">
         {viewMode === 'kanban' ? (
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
-            {statuses.map((st) => {
-              const colOrders = orders.filter((o) => o.status_id === st.id);
+          <div
+            className={`grid grid-cols-2 gap-3 lg:grid-cols-3 ${
+              statuses.length >= 6 ? 'xl:grid-cols-6' : 'xl:grid-cols-5'
+            }`}
+          >
+            {statuses.map((st, stIdx) => {
+              const validStatusIds = new Set(statuses.map((s) => s.id));
+              const colOrders = orders.filter((o) =>
+                stIdx === 0
+                  ? o.status_id === st.id ||
+                    !o.status_id ||
+                    !validStatusIds.has(o.status_id)
+                  : o.status_id === st.id
+              );
               const visibleOrders = st.is_final
                 ? colOrders.slice(0, finalVisibleCount)
                 : colOrders;
