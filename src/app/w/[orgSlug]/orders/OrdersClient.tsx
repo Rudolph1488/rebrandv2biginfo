@@ -3,11 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { compressMockupToWebp } from '@/lib/compressImage';
 import type {
   ClientRecord,
   OrderRecord,
   OrderStatus,
   Organization,
+  PrintOptionRecord,
   ProductRecord,
 } from '@/types/crm';
 import {
@@ -23,14 +25,37 @@ import {
   ChevronLeft,
   ChevronRight,
   CalendarDays,
+  ImagePlus,
 } from 'lucide-react';
 
 interface DraftItem {
   productId: string;
   name: string;
   qty: number;
+  basePrice: number;
+  baseCost: number;
   unitPrice: number;
   unitCost: number;
+  selectedOptionIds: string[];
+  color: string;
+  size: string;
+  mockupUrl: string;
+}
+
+function emptyDraftItem(): DraftItem {
+  return {
+    productId: '',
+    name: '',
+    qty: 1,
+    basePrice: 0,
+    baseCost: 0,
+    unitPrice: 0,
+    unitCost: 0,
+    selectedOptionIds: [],
+    color: '',
+    size: '',
+    mockupUrl: '',
+  };
 }
 
 export default function OrdersClient({
@@ -44,6 +69,7 @@ export default function OrdersClient({
   initialView = 'kanban',
   clients,
   products,
+  printOptions = [],
   warehouses,
   canViewCost,
   openNew = false,
@@ -59,6 +85,7 @@ export default function OrdersClient({
   initialView?: 'kanban' | 'list';
   clients: ClientRecord[];
   products: ProductRecord[];
+  printOptions?: PrintOptionRecord[];
   warehouses: Array<{ id: string; name: string; is_default: boolean }>;
   canViewCost: boolean;
   openNew?: boolean;
@@ -177,9 +204,10 @@ export default function OrdersClient({
   );
   const [ttn, setTtn] = useState('');
   const [notes, setNotes] = useState('');
-  const [items, setItems] = useState<DraftItem[]>([
-    { productId: '', name: '', qty: 1, unitPrice: 0, unitCost: 0 },
-  ]);
+  const [items, setItems] = useState<DraftItem[]>([emptyDraftItem()]);
+  const [uploadingMockupIdx, setUploadingMockupIdx] = useState<number | null>(
+    null
+  );
 
   const currencySymbol =
     org.currency === 'USD' ? '$' : org.currency === 'EUR' ? '€' : '₴';
@@ -291,17 +319,67 @@ export default function OrdersClient({
     }
   }
 
+  function recalcItemWithOptions(item: DraftItem, optionIds: string[]): DraftItem {
+    const chosen = printOptions.filter((o) => optionIds.includes(o.id));
+    const optPrice = chosen.reduce((s, o) => s + (Number(o.price) || 0), 0);
+    const optCost = chosen.reduce((s, o) => s + (Number(o.cost_price) || 0), 0);
+    return {
+      ...item,
+      selectedOptionIds: optionIds,
+      unitPrice: Number((item.basePrice + optPrice).toFixed(2)),
+      unitCost: Number((item.baseCost + optCost).toFixed(2)),
+    };
+  }
+
   function handleProductPick(idx: number, prod: ProductRecord) {
     const next = [...items];
-    next[idx] = {
-      ...next[idx],
-      productId: prod.id,
-      name: prod.name,
-      unitPrice: Number(prod.sale_price) || 0,
-      unitCost: Number(prod.cost_price ?? 0) || 0,
-    };
+    const basePrice = Number(prod.sale_price) || 0;
+    const baseCost = Number(prod.cost_price ?? 0) || 0;
+    next[idx] = recalcItemWithOptions(
+      {
+        ...next[idx],
+        productId: prod.id,
+        name: prod.name,
+        basePrice,
+        baseCost,
+      },
+      next[idx].selectedOptionIds
+    );
     setItems(next);
     setActiveItemIdx(null);
+  }
+
+  function togglePrintOption(idx: number, optId: string) {
+    const next = [...items];
+    const curr = next[idx];
+    const exists = curr.selectedOptionIds.includes(optId);
+    const updatedIds = exists
+      ? curr.selectedOptionIds.filter((id) => id !== optId)
+      : [...curr.selectedOptionIds, optId];
+    next[idx] = recalcItemWithOptions(curr, updatedIds);
+    setItems(next);
+  }
+
+  async function handleMockupUpload(idx: number, file: File) {
+    setUploadingMockupIdx(idx);
+    try {
+      const compressed = await compressMockupToWebp(file);
+      const fd = new FormData();
+      fd.append('orgId', org.id);
+      fd.append('file', compressed);
+      const res = await fetch('/api/orders/mockup', {
+        method: 'POST',
+        body: fd,
+      });
+      const data = await res.json();
+      if (res.ok && data.url) {
+        const next = [...items];
+        next[idx] = { ...next[idx], mockupUrl: data.url };
+        setItems(next);
+      }
+    } finally {
+      setUploadingMockupIdx(null);
+    }
   }
 
   const totalAmount = items.reduce(
@@ -342,15 +420,28 @@ export default function OrdersClient({
       const validItems = items.filter((i) => i.name.trim());
       if (validItems.length > 0) {
         await supabase.from('order_items').insert(
-          validItems.map((i) => ({
-            org_id: org.id,
-            order_id: createdOrder.id,
-            product_id: i.productId || null,
-            name: i.name.trim(),
-            qty: Number(i.qty) || 1,
-            unit_price: Number(i.unitPrice) || 0,
-            unit_cost: Number(i.unitCost) || 0,
-          }))
+          validItems.map((i) => {
+            const attrs: Record<string, string> = {};
+            if (i.color.trim()) attrs['Колір'] = i.color.trim();
+            if (i.size.trim()) attrs['Розмір'] = i.size.trim();
+            const chosenNames = printOptions
+              .filter((o) => i.selectedOptionIds.includes(o.id))
+              .map((o) => o.name);
+            if (chosenNames.length > 0) {
+              attrs['Нанесення'] = chosenNames.join(', ');
+            }
+            if (i.mockupUrl.trim()) attrs['Макет'] = i.mockupUrl.trim();
+            return {
+              org_id: org.id,
+              order_id: createdOrder.id,
+              product_id: i.productId || null,
+              name: i.name.trim(),
+              qty: Number(i.qty) || 1,
+              unit_price: Number(i.unitPrice) || 0,
+              unit_cost: Number(i.unitCost) || 0,
+              attributes: attrs,
+            };
+          })
         );
       }
 
@@ -387,7 +478,7 @@ export default function OrdersClient({
       setClientId('');
       setTtn('');
       setNotes('');
-      setItems([{ productId: '', name: '', qty: 1, unitPrice: 0, unitCost: 0 }]);
+      setItems([emptyDraftItem()]);
       router.refresh();
     }
 
@@ -591,7 +682,9 @@ export default function OrdersClient({
                         ? Object.entries(item.attributes)
                             .filter(
                               ([k, v]) =>
-                                k !== 'Артикул' && String(v).trim() !== ''
+                                k !== 'Артикул' &&
+                                k !== 'Макет' &&
+                                String(v).trim() !== ''
                             )
                             .map(([k, v]) => `${k}: ${v}`)
                             .join(' • ')
@@ -764,6 +857,7 @@ export default function OrdersClient({
                                     .filter(
                                       ([k, v]) =>
                                         k !== 'Артикул' &&
+                                        k !== 'Макет' &&
                                         String(v).trim() !== ''
                                     )
                                     .map(([k, v]) => `${k}: ${v}`)
@@ -1182,18 +1276,7 @@ export default function OrdersClient({
                   </span>
                   <button
                     type="button"
-                    onClick={() =>
-                      setItems([
-                        ...items,
-                        {
-                          productId: '',
-                          name: '',
-                          qty: 1,
-                          unitPrice: 0,
-                          unitCost: 0,
-                        },
-                      ])
-                    }
+                    onClick={() => setItems([...items, emptyDraftItem()])}
                     className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
                   >
                     <Plus className="h-3.5 w-3.5" /> Додати позицію
@@ -1302,6 +1385,85 @@ export default function OrdersClient({
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
+
+                      {/* Print / Branding Constructor + Color / Size / Compressed Mockup */}
+                      <div className="col-span-12 space-y-2 pt-1">
+                        {printOptions.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {printOptions.map((opt) => {
+                              const active = item.selectedOptionIds.includes(
+                                opt.id
+                              );
+                              return (
+                                <button
+                                  key={opt.id}
+                                  type="button"
+                                  onClick={() => togglePrintOption(idx, opt.id)}
+                                  className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${
+                                    active
+                                      ? 'border-indigo-600 bg-indigo-600 text-white'
+                                      : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 dark:border-white/10 dark:bg-white/5 dark:text-slate-300'
+                                  }`}
+                                >
+                                  {opt.name} (+{Number(opt.price).toFixed(0)}
+                                  {currencySymbol})
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-12 gap-1.5">
+                          <input
+                            value={item.color}
+                            onChange={(e) => {
+                              const next = [...items];
+                              next[idx] = { ...item, color: e.target.value };
+                              setItems(next);
+                            }}
+                            placeholder="Колір"
+                            className="col-span-4 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white sm:col-span-3"
+                          />
+                          <input
+                            value={item.size}
+                            onChange={(e) => {
+                              const next = [...items];
+                              next[idx] = { ...item, size: e.target.value };
+                              setItems(next);
+                            }}
+                            placeholder="Розмір"
+                            className="col-span-4 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white sm:col-span-2"
+                          />
+                          <input
+                            value={item.mockupUrl}
+                            onChange={(e) => {
+                              const next = [...items];
+                              next[idx] = { ...item, mockupUrl: e.target.value };
+                              setItems(next);
+                            }}
+                            placeholder="Лінк на макет або фото →"
+                            className="col-span-4 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white sm:col-span-5"
+                          />
+                          <label className="col-span-12 inline-flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-dashed border-indigo-300 bg-indigo-50/60 px-2 py-1.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300 sm:col-span-2">
+                            {uploadingMockupIdx === idx ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <ImagePlus className="h-3.5 w-3.5" />
+                            )}
+                            <span>{item.mockupUrl ? 'Оновити' : 'Макет'}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) handleMockupUpload(idx, f);
+                                e.target.value = '';
+                              }}
+                            />
+                          </label>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>

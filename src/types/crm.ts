@@ -77,6 +77,17 @@ export interface ProductRecord {
   created_at: string;
 }
 
+export interface PrintOptionRecord {
+  id: string;
+  org_id: string;
+  name: string;
+  price: number;
+  cost_price?: number;
+  is_active: boolean;
+  position: number;
+  created_at: string;
+}
+
 export interface OrderRecord {
   id: string;
   org_id: string;

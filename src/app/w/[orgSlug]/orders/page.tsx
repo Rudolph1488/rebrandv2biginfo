@@ -6,6 +6,7 @@ import type {
   ClientRecord,
   OrderRecord,
   OrderStatus,
+  PrintOptionRecord,
   ProductRecord,
 } from '@/types/crm';
 
@@ -69,7 +70,7 @@ export default async function OrdersPage({
     }
   }
 
-  const [statusesRes, ordersRes, clientsRes, productsRes, warehousesRes] =
+  const [statusesRes, ordersRes, clientsRes, productsRes, warehousesRes, printOptsRes] =
     await Promise.all([
       supabase
         .from('order_statuses')
@@ -100,6 +101,16 @@ export default async function OrdersPage({
         .eq('org_id', org.id)
         .eq('is_active', true)
         .order('is_default', { ascending: false }),
+      supabase
+        .from('print_options')
+        .select(
+          canViewCost
+            ? 'id, org_id, name, price, cost_price, is_active, position, created_at'
+            : 'id, org_id, name, price, is_active, position, created_at'
+        )
+        .eq('org_id', org.id)
+        .eq('is_active', true)
+        .order('position', { ascending: true }),
     ]);
 
   const normalizedOrders = (ordersRes.data || []).map((o) => ({
@@ -133,6 +144,9 @@ export default async function OrdersPage({
       initialView={view === 'list' ? 'list' : 'kanban'}
       clients={clientsList}
       products={(productsRes.data || []) as unknown as ProductRecord[]}
+      printOptions={
+        (printOptsRes.data || []) as unknown as PrintOptionRecord[]
+      }
       warehouses={(warehousesRes.data || []) as Array<{ id: string; name: string; is_default: boolean }>}
       canViewCost={canViewCost}
       openNew={openNew === '1'}

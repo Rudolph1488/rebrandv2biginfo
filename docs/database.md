@@ -16,6 +16,7 @@
 7. **[0007_performance_indexes.sql](../supabase/migrations/0007_performance_indexes.sql)** — композитні індекси на `orders`, `order_items`, `cashflow_transactions`, `clients` для швидких запитів.
 8. **[0008_push_notifications.sql](../supabase/migrations/0008_push_notifications.sql)** — статус сповіщень `push_permission` в `organization_members`, таблиця пристроїв `push_subscriptions` (Web Push VAPID) та журнал `notification_logs`.
 9. **[0009_production_timer.sql](../supabase/migrations/0009_production_timer.sql)** — поля `production_elapsed_seconds` і `production_timer_started_at` в `orders` для обліку фактичного часу роботи над замовленням із підтримкою пауз.
+10. **[0010_print_options.sql](../supabase/migrations/0010_print_options.sql)** — таблиця `print_options` (зони/формати нанесення з ціною і собівартістю для конструктора кастомних виробів).
 
 ---
 

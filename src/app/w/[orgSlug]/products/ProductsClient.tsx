@@ -3,22 +3,54 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import type { Organization, ProductRecord } from '@/types/crm';
-import { Plus, Search, Edit3, Trash2, X, Loader2 } from 'lucide-react';
+import type {
+  Organization,
+  PrintOptionRecord,
+  ProductRecord,
+} from '@/types/crm';
+import {
+  Plus,
+  Search,
+  Edit3,
+  Trash2,
+  X,
+  Loader2,
+  Layers,
+  Package,
+} from 'lucide-react';
+
+const DEFAULT_PRINT_PRESETS = [
+  { name: 'Серце / Груди (лого)', price: 120, cost_price: 40 },
+  { name: 'Спина А4', price: 180, cost_price: 60 },
+  { name: 'Спина А3', price: 250, cost_price: 95 },
+  { name: 'Спина А2', price: 380, cost_price: 150 },
+  { name: 'Плече / Рукав', price: 100, cost_price: 35 },
+];
 
 export default function ProductsClient({
   org,
   initialProducts,
+  initialPrintOptions = [],
+  printOptionsMigrationMissing = false,
   canViewCost,
   canManage,
 }: {
   org: Organization;
   initialProducts: ProductRecord[];
+  initialPrintOptions?: PrintOptionRecord[];
+  printOptionsMigrationMissing?: boolean;
   canViewCost: boolean;
   canManage: boolean;
 }) {
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState<'products' | 'options'>('products');
   const [products, setProducts] = useState<ProductRecord[]>(initialProducts);
+  const [printOptions, setPrintOptions] =
+    useState<PrintOptionRecord[]>(initialPrintOptions);
+  const [optName, setOptName] = useState('');
+  const [optPrice, setOptPrice] = useState('150');
+  const [optCost, setOptCost] = useState('50');
+  const [savingOpt, setSavingOpt] = useState(false);
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -124,6 +156,61 @@ export default function ProductsClient({
     }
   }
 
+  async function handleAddPrintOption(e: React.FormEvent) {
+    e.preventDefault();
+    if (!optName.trim()) return;
+    setSavingOpt(true);
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('print_options')
+      .insert({
+        org_id: org.id,
+        name: optName.trim(),
+        price: Number(optPrice) || 0,
+        cost_price: canViewCost ? Number(optCost) || 0 : 0,
+        position: printOptions.length,
+      })
+      .select()
+      .single();
+    setSavingOpt(false);
+    if (!error && data) {
+      setPrintOptions([...printOptions, data as PrintOptionRecord]);
+      setOptName('');
+      router.refresh();
+    }
+  }
+
+  async function handleSeedPresets() {
+    setSavingOpt(true);
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('print_options')
+      .insert(
+        DEFAULT_PRINT_PRESETS.map((p, idx) => ({
+          org_id: org.id,
+          name: p.name,
+          price: p.price,
+          cost_price: p.cost_price,
+          position: printOptions.length + idx,
+        }))
+      )
+      .select();
+    setSavingOpt(false);
+    if (!error && data) {
+      setPrintOptions([...printOptions, ...(data as PrintOptionRecord[])]);
+      router.refresh();
+    }
+  }
+
+  async function handleDeletePrintOption(id: string) {
+    const supabase = createClient();
+    const { error } = await supabase.from('print_options').delete().eq('id', id);
+    if (!error) {
+      setPrintOptions(printOptions.filter((o) => o.id !== id));
+      router.refresh();
+    }
+  }
+
   const inputCls =
     'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-900 dark:border-white/10 dark:bg-white/5 dark:text-white dark:focus:border-white/40';
 
@@ -139,7 +226,7 @@ export default function ProductsClient({
           </p>
         </div>
 
-        {canManage && (
+        {canManage && activeTab === 'products' && (
           <button
             type="button"
             onClick={openCreate}
@@ -150,6 +237,148 @@ export default function ProductsClient({
           </button>
         )}
       </div>
+
+      {/* Tabs: Products vs Print Options */}
+      <div className="flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-white/5 sm:w-fit">
+        <button
+          type="button"
+          onClick={() => setActiveTab('products')}
+          className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold transition sm:flex-none ${
+            activeTab === 'products'
+              ? 'bg-white text-slate-900 shadow-2xs dark:bg-white/10 dark:text-white'
+              : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
+          }`}
+        >
+          <Package className="h-3.5 w-3.5" />
+          Товари / Заготовки ({products.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('options')}
+          className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold transition sm:flex-none ${
+            activeTab === 'options'
+              ? 'bg-white text-slate-900 shadow-2xs dark:bg-white/10 dark:text-white'
+              : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
+          }`}
+        >
+          <Layers className="h-3.5 w-3.5" />
+          Опції нанесення ({printOptions.length})
+        </button>
+      </div>
+
+      {activeTab === 'options' ? (
+        <div className="space-y-4">
+          {printOptionsMigrationMissing && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+              Виконай SQL-міграцію{' '}
+              <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs dark:bg-amber-500/20">
+                0010_print_options.sql
+              </code>{' '}
+              у Supabase → SQL Editor.
+            </div>
+          )}
+
+          {canManage && (
+            <form
+              onSubmit={handleAddPrintOption}
+              className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs dark:border-white/10 dark:bg-[#0d1017]"
+            >
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Нова зона / формат нанесення
+                </h2>
+                {printOptions.length === 0 && (
+                  <button
+                    type="button"
+                    disabled={savingOpt}
+                    onClick={handleSeedPresets}
+                    className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-500/15 dark:text-indigo-300"
+                  >
+                    + Завантажити типові (Серце, А4, А3, А2, Плече)
+                  </button>
+                )}
+              </div>
+              <div className="grid gap-2.5 sm:grid-cols-4">
+                <input
+                  required
+                  value={optName}
+                  onChange={(e) => setOptName(e.target.value)}
+                  placeholder="Напр. Спина А3 (ДТФ)"
+                  className={`${inputCls} sm:col-span-2`}
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  value={optPrice}
+                  onChange={(e) => setOptPrice(e.target.value)}
+                  placeholder="Доплата в ціну"
+                  className={inputCls}
+                />
+                <div className="flex gap-2">
+                  {canViewCost && (
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={optCost}
+                      onChange={(e) => setOptCost(e.target.value)}
+                      placeholder="Собів."
+                      className={inputCls}
+                    />
+                  )}
+                  <button
+                    type="submit"
+                    disabled={savingOpt}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                    style={{ backgroundColor: org.primary_color }}
+                  >
+                    {savingOpt ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Plus className="h-4 w-4" />
+                    )}
+                    Додати
+                  </button>
+                </div>
+              </div>
+            </form>
+          )}
+
+          <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            {printOptions.map((opt) => (
+              <div
+                key={opt.id}
+                className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs dark:border-white/10 dark:bg-[#0d1017]"
+              >
+                <div>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                    {opt.name}
+                  </p>
+                  <div className="mt-1 flex items-center gap-3 text-xs">
+                    <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                      +{Number(opt.price).toFixed(0)} {currencySymbol}
+                    </span>
+                    {canViewCost && opt.cost_price !== undefined && (
+                      <span className="text-slate-500 dark:text-slate-400">
+                        Собів.: +{Number(opt.cost_price).toFixed(0)} {currencySymbol}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePrintOption(opt.id)}
+                    className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <>
 
       <div className="relative max-w-md">
         <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -424,6 +653,8 @@ export default function ProductsClient({
             </form>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

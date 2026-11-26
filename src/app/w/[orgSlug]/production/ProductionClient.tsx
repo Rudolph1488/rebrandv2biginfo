@@ -441,15 +441,35 @@ export default function ProductionClient({
                               </span>
                             </div>
                             {attrs.length > 0 && (
-                              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                                {attrs.map(([k, v]) => (
-                                  <span
-                                    key={k}
-                                    className="rounded-md bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 shadow-2xs dark:bg-[#131722] dark:text-slate-300"
-                                  >
-                                    {k}: <strong className="text-slate-900 dark:text-white">{v}</strong>
-                                  </span>
-                                ))}
+                              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                {attrs.map(([k, v]) =>
+                                  k === 'Макет' ? (
+                                    <a
+                                      key={k}
+                                      href={String(v)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-500/15 dark:text-indigo-300"
+                                    >
+                                      📎 Відкрити макет
+                                      <ExternalLink className="h-3 w-3" />
+                                    </a>
+                                  ) : (
+                                    <span
+                                      key={k}
+                                      className={`rounded-md px-2 py-0.5 text-[11px] font-medium shadow-2xs ${
+                                        k === 'Нанесення'
+                                          ? 'bg-indigo-50 text-indigo-800 dark:bg-indigo-500/15 dark:text-indigo-200'
+                                          : 'bg-white text-slate-600 dark:bg-[#131722] dark:text-slate-300'
+                                      }`}
+                                    >
+                                      {k}:{' '}
+                                      <strong className="text-slate-900 dark:text-white">
+                                        {v}
+                                      </strong>
+                                    </span>
+                                  )
+                                )}
                               </div>
                             )}
                           </div>
