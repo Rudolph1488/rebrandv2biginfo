@@ -111,7 +111,7 @@ export default function OrdersClient({
       const { data } = await supabase
         .from('orders')
         .select(
-          'id, org_id, order_number, status_id, client_id, warehouse_id, stock_deducted, source_name, total_amount, total_cost, ttn, delivery_city, delivery_warehouse, notes, created_at, client:clients(id, contact_person, phone)'
+          'id, org_id, order_number, status_id, client_id, warehouse_id, stock_deducted, source_name, total_amount, total_cost, ttn, delivery_city, delivery_warehouse, notes, deadline, production_status, created_at, client:clients(id, contact_person, phone), order_items(id, name, qty, attributes)'
         )
         .eq('org_id', org.id)
         .or(orParts.join(','))
@@ -682,6 +682,45 @@ export default function OrdersClient({
                             {ord.client?.contact_person || 'Без клієнта'}
                           </span>
                         </p>
+
+                        {ord.order_items && ord.order_items.length > 0 && (
+                          <div className="mt-2 space-y-1 rounded-lg bg-slate-50/90 p-1.5 text-[11px] dark:bg-white/[0.04]">
+                            {ord.order_items.slice(0, 2).map((item) => {
+                              const attrText = item.attributes
+                                ? Object.entries(item.attributes)
+                                    .filter(
+                                      ([k, v]) =>
+                                        k !== 'Артикул' &&
+                                        String(v).trim() !== ''
+                                    )
+                                    .map(([k, v]) => `${k}: ${v}`)
+                                    .join(' • ')
+                                : '';
+                              return (
+                                <div key={item.id} className="leading-tight">
+                                  <div className="flex items-start justify-between gap-1.5">
+                                    <span className="line-clamp-1 font-medium text-slate-700 dark:text-slate-200">
+                                      {item.name}
+                                    </span>
+                                    <span className="shrink-0 font-mono text-[10px] font-bold text-slate-800 dark:text-white">
+                                      ×{item.qty}
+                                    </span>
+                                  </div>
+                                  {attrText && (
+                                    <p className="mt-0.5 truncate text-[10px] text-slate-500 dark:text-slate-400">
+                                      {attrText}
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {ord.order_items.length > 2 && (
+                              <p className="text-[10px] font-medium text-slate-400">
+                                +{ord.order_items.length - 2} позиц.
+                              </p>
+                            )}
+                          </div>
+                        )}
 
                         {ord.ttn && (
                           <p className="mt-1 flex items-center gap-1 truncate font-mono text-[10px] text-indigo-600 dark:text-indigo-400">
