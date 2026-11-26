@@ -80,7 +80,7 @@ export default async function OrdersPage({
         .select('id, contact_person, phone, np_city_name, np_warehouse_name')
         .eq('org_id', org.id)
         .order('created_at', { ascending: false })
-        .limit(50),
+        .limit(15),
       supabase
         .from('products')
         .select(
@@ -91,7 +91,7 @@ export default async function OrdersPage({
         .eq('org_id', org.id)
         .eq('is_active', true)
         .order('name', { ascending: true })
-        .limit(200),
+        .limit(20),
       supabase
         .from('warehouses')
         .select('id, name, is_default')
