@@ -1592,36 +1592,16 @@ export default function OrdersClient({
 
                         <div className="grid grid-cols-12 gap-1.5">
                           <input
-                            value={item.color}
-                            onChange={(e) => {
-                              const next = [...items];
-                              next[idx] = { ...item, color: e.target.value };
-                              setItems(next);
-                            }}
-                            placeholder="Колір"
-                            className="col-span-4 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white sm:col-span-3"
-                          />
-                          <input
-                            value={item.size}
-                            onChange={(e) => {
-                              const next = [...items];
-                              next[idx] = { ...item, size: e.target.value };
-                              setItems(next);
-                            }}
-                            placeholder="Розмір"
-                            className="col-span-4 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white sm:col-span-2"
-                          />
-                          <input
                             value={item.mockupUrl}
                             onChange={(e) => {
                               const next = [...items];
                               next[idx] = { ...item, mockupUrl: e.target.value };
                               setItems(next);
                             }}
-                            placeholder="Лінк на макет або фото →"
-                            className="col-span-4 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white sm:col-span-5"
+                            placeholder="Лінк на макет або завантажте прев'ю →"
+                            className="col-span-8 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white sm:col-span-9"
                           />
-                          <label className="col-span-12 inline-flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-dashed border-indigo-300 bg-indigo-50/60 px-2 py-1.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300 sm:col-span-2">
+                          <label className="col-span-4 inline-flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-dashed border-indigo-300 bg-indigo-50/60 px-2 py-1.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300 sm:col-span-3">
                             {uploadingMockupIdx === idx ? (
                               <Loader2 className="h-3.5 w-3.5 animate-spin" />
                             ) : (
@@ -1640,6 +1620,27 @@ export default function OrdersClient({
                             />
                           </label>
                         </div>
+
+                        {canViewCost && (item.dtfZones.length > 0 || item.unitCost > 0) && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-100/80 px-2.5 py-1 text-[11px] dark:bg-white/5">
+                            <span className="text-slate-600 dark:text-slate-300">
+                              Собівартість:{' '}
+                              <strong className="font-mono text-slate-900 dark:text-white">
+                                {item.unitCost.toFixed(2)} {currencySymbol}/шт
+                              </strong>
+                              {item.qty > 1 && (
+                                <span className="ml-1 text-slate-500">
+                                  (разом {(item.unitCost * item.qty).toFixed(0)} {currencySymbol})
+                                </span>
+                              )}
+                            </span>
+                            <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                              Маржа: +
+                              {((item.unitPrice - item.unitCost) * (item.qty || 1)).toFixed(0)}{' '}
+                              {currencySymbol}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
