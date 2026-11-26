@@ -584,10 +584,72 @@ export default function OrdersClient({
                   {ord.client?.contact_person || 'Без клієнта'}
                 </p>
 
+                {ord.order_items && ord.order_items.length > 0 && (
+                  <div className="mt-2 space-y-1.5 rounded-xl bg-slate-50/90 p-2.5 text-xs dark:bg-white/[0.04]">
+                    {ord.order_items.slice(0, 3).map((item) => {
+                      const attrText = item.attributes
+                        ? Object.entries(item.attributes)
+                            .filter(
+                              ([k, v]) =>
+                                k !== 'Артикул' && String(v).trim() !== ''
+                            )
+                            .map(([k, v]) => `${k}: ${v}`)
+                            .join(' • ')
+                        : '';
+                      return (
+                        <div key={item.id} className="leading-snug">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="font-medium text-slate-800 dark:text-slate-200">
+                              {item.name}
+                            </span>
+                            <span className="shrink-0 font-mono text-xs font-bold text-slate-900 dark:text-white">
+                              ×{item.qty}
+                            </span>
+                          </div>
+                          {attrText && (
+                            <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                              {attrText}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {ord.order_items.length > 3 && (
+                      <p className="text-[11px] font-medium text-slate-400">
+                        +{ord.order_items.length - 3} позиц.
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {ord.ttn && (
-                  <p className="mt-1 flex items-center gap-1.5 font-mono text-xs text-indigo-600 dark:text-indigo-400">
+                  <p className="mt-2 flex items-center gap-1.5 font-mono text-xs text-indigo-600 dark:text-indigo-400">
                     <Truck className="h-3.5 w-3.5" /> {ord.ttn}
                   </p>
+                )}
+
+                {ord.deadline && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700 dark:bg-white/10 dark:text-slate-300">
+                      <CalendarDays className="h-3 w-3" />
+                      {ord.deadline.split('-').reverse().join('.')}
+                    </span>
+                    <span
+                      className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${
+                        ord.production_status === 'done'
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+                          : ord.production_status === 'in_progress'
+                            ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400'
+                            : 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'
+                      }`}
+                    >
+                      {ord.production_status === 'done'
+                        ? 'Вироблено ✓'
+                        : ord.production_status === 'in_progress'
+                          ? 'У виробництві'
+                          : 'Черга вир.'}
+                    </span>
+                  </div>
                 )}
 
                 <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5 dark:border-white/10">
