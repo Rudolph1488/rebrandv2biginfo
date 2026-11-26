@@ -23,6 +23,9 @@ import {
   GripVertical,
   ArrowUp,
   ArrowDown,
+  Bell,
+  BellOff,
+  BellRing,
 } from 'lucide-react';
 
 interface MemberRow {
@@ -30,6 +33,8 @@ interface MemberRow {
   user_id: string;
   role: OrgRole;
   permissions: OrgPermissions;
+  push_permission?: 'default' | 'granted' | 'denied' | 'unsupported';
+  push_devices?: number;
   profile: { email: string; full_name: string | null } | null;
 }
 
@@ -687,6 +692,25 @@ export default function SettingsClient({
                       {m.profile?.email} •{' '}
                       <span className="font-semibold uppercase">{m.role}</span>
                     </p>
+                    <div className="mt-1">
+                      {m.push_permission === 'granted' ? (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
+                          <BellRing className="h-3 w-3" />
+                          Сповіщення: Увімкнено
+                          {m.push_devices ? ` (${m.push_devices})` : ''}
+                        </span>
+                      ) : m.push_permission === 'denied' ? (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-500/15 dark:text-red-400">
+                          <BellOff className="h-3 w-3" />
+                          Сповіщення: Заблоковано
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-white/10 dark:text-slate-400">
+                          <Bell className="h-3 w-3" />
+                          Сповіщення: Не підключено
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {memberIsAdmin ? (
