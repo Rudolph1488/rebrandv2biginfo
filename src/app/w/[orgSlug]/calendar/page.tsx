@@ -25,16 +25,34 @@ export default async function CalendarPage({
 
   const supabase = await createClient();
 
+  const { data: statusesData } = await supabase
+    .from('order_statuses')
+    .select('*')
+    .eq('org_id', org.id)
+    .order('position', { ascending: true });
+
+  const statuses = (statusesData || []) as OrderStatus[];
+  const activeStatusIds = statuses.filter((s) => !s.is_final).map((s) => s.id);
+
   const scheduledSelect = canManageOrders
     ? 'id, org_id, order_number, status_id, client_id, warehouse_id, stock_deducted, source_name, total_amount, ttn, delivery_city, delivery_warehouse, notes, deadline, production_status, created_at, client:clients(id, contact_person, phone), order_items(id, name, qty, attributes)'
     : 'id, org_id, order_number, status_id, notes, deadline, production_status, created_at, order_items(id, name, qty, attributes)';
 
-  const [statusesRes, scheduledRes, unscheduledRes] = await Promise.all([
-    supabase
-      .from('order_statuses')
-      .select('*')
-      .eq('org_id', org.id)
-      .order('position', { ascending: true }),
+  const unscheduledQuery =
+    canManageOrders && activeStatusIds.length > 0
+      ? supabase
+          .from('orders')
+          .select(
+            'id, org_id, order_number, status_id, client_id, warehouse_id, stock_deducted, source_name, total_amount, ttn, delivery_city, delivery_warehouse, notes, deadline, production_status, created_at, client:clients(id, contact_person, phone)'
+          )
+          .eq('org_id', org.id)
+          .in('status_id', activeStatusIds)
+          .is('deadline', null)
+          .order('updated_at', { ascending: false })
+          .limit(100)
+      : Promise.resolve({ data: [], error: null });
+
+  const [scheduledRes, unscheduledRes] = await Promise.all([
     supabase
       .from('orders')
       .select(scheduledSelect)
@@ -43,17 +61,7 @@ export default async function CalendarPage({
       .order('deadline', { ascending: true })
       .order('order_number', { ascending: false })
       .limit(500),
-    canManageOrders
-      ? supabase
-          .from('orders')
-          .select(
-            'id, org_id, order_number, status_id, client_id, warehouse_id, stock_deducted, source_name, total_amount, ttn, delivery_city, delivery_warehouse, notes, deadline, production_status, created_at, client:clients(id, contact_person, phone)'
-          )
-          .eq('org_id', org.id)
-          .is('deadline', null)
-          .order('created_at', { ascending: false })
-          .limit(100)
-      : Promise.resolve({ data: [], error: null }),
+    unscheduledQuery,
   ]);
 
   let migrationMissing = false;
@@ -61,14 +69,15 @@ export default async function CalendarPage({
 
   if (scheduledRes.error || unscheduledRes.error) {
     migrationMissing = true;
-    if (canManageOrders) {
+    if (canManageOrders && activeStatusIds.length > 0) {
       const fallbackRes = await supabase
         .from('orders')
         .select(
           'id, org_id, order_number, status_id, client_id, warehouse_id, stock_deducted, source_name, total_amount, ttn, delivery_city, delivery_warehouse, notes, created_at, client:clients(id, contact_person, phone)'
         )
         .eq('org_id', org.id)
-        .order('created_at', { ascending: false })
+        .in('status_id', activeStatusIds)
+        .order('updated_at', { ascending: false })
         .limit(100);
       unscheduledRows = (fallbackRes.data || []).map((row) => ({
         ...row,
@@ -94,7 +103,7 @@ export default async function CalendarPage({
   return (
     <CalendarClient
       org={org}
-      statuses={(statusesRes.data || []) as OrderStatus[]}
+      statuses={statuses}
       initialScheduled={normalize(scheduledRes.data)}
       initialUnscheduled={normalize(unscheduledRows)}
       canManageOrders={canManageOrders}

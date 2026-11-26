@@ -24,7 +24,7 @@ export interface ProductionOrderRow {
   id: string;
   order_number: number;
   status_id: string | null;
-  deadline: string;
+  deadline: string | null;
   notes: string | null;
   ttn: string | null;
   delivery_city: string | null;
@@ -175,7 +175,7 @@ export default function ProductionClient({
             Виробництво
           </h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Заявки на виготовлення, сформовані автоматично з дедлайнів у Календарі
+            Заявки з підтверджених замовлень (етап «Підтверджено» і далі)
           </p>
         </div>
 
@@ -324,7 +324,9 @@ export default function ProductionClient({
           {filteredOrders.map((o) => {
             const st = o.status_id ? statusMap.get(o.status_id) : null;
             const isOverdue =
-              o.production_status !== 'done' && o.deadline < todayKey;
+              Boolean(o.deadline) &&
+              o.production_status !== 'done' &&
+              (o.deadline as string) < todayKey;
             const isToday = o.deadline === todayKey;
             const acceptedName = o.production_accepted_by
               ? profileMap[o.production_accepted_by] || 'Виробник'
@@ -383,11 +385,13 @@ export default function ProductionClient({
                       }`}
                     >
                       <CalendarDays className="h-3.5 w-3.5" />
-                      {isToday
-                        ? 'Сьогодні'
-                        : isOverdue
-                          ? `Прострочено (${formatUaDate(o.deadline)})`
-                          : formatUaDate(o.deadline)}
+                      {!o.deadline
+                        ? 'Без дедлайну'
+                        : isToday
+                          ? 'Сьогодні'
+                          : isOverdue
+                            ? `Прострочено (${formatUaDate(o.deadline)})`
+                            : formatUaDate(o.deadline)}
                     </span>
                   </div>
 
