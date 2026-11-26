@@ -181,6 +181,58 @@ async function findOrCreateProduct(
   return { id: null, costPrice: 0 };
 }
 
+function extractProductAttributes(
+  p: Record<string, unknown>
+): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  if (p.sku) attrs['Артикул'] = String(p.sku);
+
+  const pushPair = (k: unknown, v: unknown) => {
+    const key = typeof k === 'string' ? k.trim() : '';
+    if (!key || v === null || v === undefined) return;
+    const val =
+      typeof v === 'object'
+        ? String(
+            (v as Record<string, unknown>).title ||
+              (v as Record<string, unknown>).name ||
+              (v as Record<string, unknown>).value ||
+              (v as Record<string, unknown>).label ||
+              ''
+          ).trim()
+        : String(v).trim();
+    if (val) attrs[key] = val;
+  };
+
+  if (typeof p.variant === 'string' && p.variant.trim()) {
+    attrs['Варіант'] = p.variant.trim();
+  } else if (p.variant && typeof p.variant === 'object' && !Array.isArray(p.variant)) {
+    for (const [k, v] of Object.entries(p.variant as Record<string, unknown>)) {
+      pushPair(k, v);
+    }
+  }
+
+  for (const field of ['options', 'variants', 'attributes', 'properties'] as const) {
+    const raw = p[field];
+    if (Array.isArray(raw)) {
+      for (const opt of raw) {
+        if (!opt || typeof opt !== 'object') continue;
+        const o = opt as Record<string, unknown>;
+        const k = o.name || o.title || o.label || o.key || o.option_name || o.option;
+        const v = o.value ?? o.option_value ?? o.selected_value ?? o.text ?? o.title;
+        if (k && v !== undefined && k !== v) {
+          pushPair(k, v);
+        }
+      }
+    } else if (raw && typeof raw === 'object') {
+      for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+        pushPair(k, v);
+      }
+    }
+  }
+
+  return attrs;
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ channelId: string }> }
@@ -349,36 +401,28 @@ export async function POST(
         : stages?.[0]?.id || null;
 
     // 3. Parse items & total (preserving Weblium variants/options like Size, Color, SKU)
+    if (Array.isArray(body.order?.products)) {
+      console.log('Weblium products payload:', JSON.stringify(body.order.products));
+    }
+
     const rawItems = Array.isArray(body.items)
       ? body.items
       : Array.isArray(body.order?.products)
-        ? body.order.products.map(
-          (p: {
-            name: string;
-            qty: number;
-            amount: number;
-            sku?: string;
-            variant?: string;
-            options?: Array<{ name?: string; title?: string; value?: string }>;
-          }) => {
-            const attrs: Record<string, string> = {};
-            if (p.sku) attrs['Артикул'] = String(p.sku);
-            if (p.variant) attrs['Варіант'] = String(p.variant);
-            if (Array.isArray(p.options)) {
-              for (const opt of p.options) {
-                const k = opt.name || opt.title;
-                if (k && opt.value) attrs[String(k)] = String(opt.value);
-              }
-            }
-            return {
-              name: p.name,
-              qty: p.qty || 1,
-              unitPrice: (p.amount || 0) / 100,
-              attributes: attrs,
-            };
-          }
-        )
+        ? body.order.products.map((p: Record<string, unknown>) => ({
+            name: String(p.name || 'Товар'),
+            sku: p.sku ? String(p.sku) : undefined,
+            qty: Number(p.qty) || 1,
+            unitPrice: (Number(p.amount) || 0) / 100,
+            attributes: extractProductAttributes(p),
+          }))
         : [];
+
+    const orderNotes =
+      body.notes ||
+      body.order?.custom_fields?.['Коментар'] ||
+      body.order?.comment ||
+      body.order?.notes ||
+      null;
 
     const totalAmount =
       Number(body.totalSum) ||
@@ -402,7 +446,7 @@ export async function POST(
         total_amount: totalAmount,
         delivery_city: deliveryCity,
         delivery_warehouse: deliveryWarehouse,
-        notes: body.notes || null,
+        notes: orderNotes,
       })
       .select('id, order_number')
       .single();
