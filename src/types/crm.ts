@@ -28,6 +28,13 @@ export interface Organization {
   primary_color: string;
   currency: string;
   onboarding_completed: boolean;
+  dtf_settings?: {
+    roll_width_cm?: number;
+    price_per_meter?: number;
+    gap_cm?: number;
+    press_cost_per_print?: number;
+    markup_multiplier?: number;
+  } | null;
   created_at: string;
 }
 

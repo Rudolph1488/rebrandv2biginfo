@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { compressMockupToWebp } from '@/lib/compressImage';
+import { calculateDtfNesting } from '@/lib/dtfCalculator';
 import type {
   ClientRecord,
   OrderRecord,
@@ -28,6 +29,21 @@ import {
   ImagePlus,
 } from 'lucide-react';
 
+interface DtfZoneItem {
+  zone: string;
+  widthCm: number;
+  heightCm: number;
+}
+
+const STANDARD_PRINT_ZONES = [
+  'Серце',
+  'Груди',
+  'Спина',
+  'Плече / Рукав',
+  'Капюшон',
+  'Чашка',
+];
+
 interface DraftItem {
   productId: string;
   name: string;
@@ -37,6 +53,10 @@ interface DraftItem {
   unitPrice: number;
   unitCost: number;
   selectedOptionIds: string[];
+  dtfZones: DtfZoneItem[];
+  draftZone: string;
+  draftW: number;
+  draftH: number;
   color: string;
   size: string;
   mockupUrl: string;
@@ -52,6 +72,10 @@ function emptyDraftItem(): DraftItem {
     unitPrice: 0,
     unitCost: 0,
     selectedOptionIds: [],
+    dtfZones: [],
+    draftZone: 'Серце',
+    draftW: 10,
+    draftH: 10,
     color: '',
     size: '',
     mockupUrl: '',
@@ -319,16 +343,66 @@ export default function OrdersClient({
     }
   }
 
-  function recalcItemWithOptions(item: DraftItem, optionIds: string[]): DraftItem {
+  function recalcItemWithOptions(
+    item: DraftItem,
+    optionIds: string[],
+    zones: DtfZoneItem[] = item.dtfZones,
+    qtyOverride?: number
+  ): DraftItem {
+    const qty = Math.max(1, qtyOverride ?? item.qty);
     const chosen = printOptions.filter((o) => optionIds.includes(o.id));
     const optPrice = chosen.reduce((s, o) => s + (Number(o.price) || 0), 0);
     const optCost = chosen.reduce((s, o) => s + (Number(o.cost_price) || 0), 0);
+
+    let dtfCostPerUnit = 0;
+    let dtfRecPricePerUnit = 0;
+    for (const z of zones) {
+      const calc = calculateDtfNesting({
+        widthCm: z.widthCm,
+        heightCm: z.heightCm,
+        qty,
+        settings: org.dtf_settings,
+      });
+      dtfCostPerUnit += calc.costPerUnit;
+      dtfRecPricePerUnit += calc.recommendedPricePerUnit;
+    }
+
     return {
       ...item,
+      qty,
       selectedOptionIds: optionIds,
-      unitPrice: Number((item.basePrice + optPrice).toFixed(2)),
-      unitCost: Number((item.baseCost + optCost).toFixed(2)),
+      dtfZones: zones,
+      unitPrice: Number(
+        (item.basePrice + optPrice + dtfRecPricePerUnit).toFixed(2)
+      ),
+      unitCost: Number((item.baseCost + optCost + dtfCostPerUnit).toFixed(2)),
     };
+  }
+
+  function handleAddDtfZone(idx: number) {
+    const next = [...items];
+    const curr = next[idx];
+    const zone: DtfZoneItem = {
+      zone: curr.draftZone || 'Серце',
+      widthCm: Math.max(1, Number(curr.draftW) || 10),
+      heightCm: Math.max(1, Number(curr.draftH) || 10),
+    };
+    next[idx] = recalcItemWithOptions(curr, curr.selectedOptionIds, [
+      ...curr.dtfZones,
+      zone,
+    ]);
+    setItems(next);
+  }
+
+  function handleRemoveDtfZone(idx: number, zIdx: number) {
+    const next = [...items];
+    const curr = next[idx];
+    next[idx] = recalcItemWithOptions(
+      curr,
+      curr.selectedOptionIds,
+      curr.dtfZones.filter((_, i) => i !== zIdx)
+    );
+    setItems(next);
   }
 
   function handleProductPick(idx: number, prod: ProductRecord) {
@@ -427,8 +501,12 @@ export default function OrdersClient({
             const chosenNames = printOptions
               .filter((o) => i.selectedOptionIds.includes(o.id))
               .map((o) => o.name);
-            if (chosenNames.length > 0) {
-              attrs['Нанесення'] = chosenNames.join(', ');
+            const dtfNames = i.dtfZones.map(
+              (z) => `${z.zone} (${z.widthCm}×${z.heightCm} см)`
+            );
+            const allPrint = [...dtfNames, ...chosenNames];
+            if (allPrint.length > 0) {
+              attrs['Нанесення'] = allPrint.join(', ');
             }
             if (i.mockupUrl.trim()) attrs['Макет'] = i.mockupUrl.trim();
             return {
@@ -1353,7 +1431,17 @@ export default function OrdersClient({
                         value={item.qty}
                         onChange={(e) => {
                           const next = [...items];
-                          next[idx] = { ...item, qty: Number(e.target.value) };
+                          const nextQty = Math.max(1, Number(e.target.value) || 1);
+                          next[idx] =
+                            item.dtfZones.length > 0 ||
+                            item.selectedOptionIds.length > 0
+                              ? recalcItemWithOptions(
+                                  item,
+                                  item.selectedOptionIds,
+                                  item.dtfZones,
+                                  nextQty
+                                )
+                              : { ...item, qty: Number(e.target.value) };
                           setItems(next);
                         }}
                         placeholder="К-ть"
@@ -1388,6 +1476,95 @@ export default function OrdersClient({
 
                       {/* Print / Branding Constructor + Color / Size / Compressed Mockup */}
                       <div className="col-span-12 space-y-2 pt-1">
+                        {/* DTF Roll Calculator Zone Builder */}
+                        <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-indigo-200/70 bg-indigo-50/40 p-2 dark:border-indigo-500/20 dark:bg-indigo-500/5">
+                          <select
+                            value={item.draftZone}
+                            onChange={(e) => {
+                              const next = [...items];
+                              next[idx] = { ...item, draftZone: e.target.value };
+                              setItems(next);
+                            }}
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium dark:border-white/10 dark:bg-[#131722] dark:text-white"
+                          >
+                            {STANDARD_PRINT_ZONES.map((z) => (
+                              <option key={z} value={z}>
+                                {z}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.draftW}
+                              onChange={(e) => {
+                                const next = [...items];
+                                next[idx] = {
+                                  ...item,
+                                  draftW: Number(e.target.value),
+                                };
+                                setItems(next);
+                              }}
+                              className="w-12 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-center text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white"
+                              title="Ширина (см)"
+                            />
+                            <span>×</span>
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.draftH}
+                              onChange={(e) => {
+                                const next = [...items];
+                                next[idx] = {
+                                  ...item,
+                                  draftH: Number(e.target.value),
+                                };
+                                setItems(next);
+                              }}
+                              className="w-12 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-center text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white"
+                              title="Висота (см)"
+                            />
+                            <span>см</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleAddDtfZone(idx)}
+                            className="rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700"
+                          >
+                            + Зона DTF
+                          </button>
+
+                          {item.dtfZones.map((z, zIdx) => {
+                            const calc = calculateDtfNesting({
+                              widthCm: z.widthCm,
+                              heightCm: z.heightCm,
+                              qty: item.qty || 1,
+                              settings: org.dtf_settings,
+                            });
+                            return (
+                              <span
+                                key={zIdx}
+                                className="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-0.5 text-[11px] font-semibold text-indigo-700 shadow-2xs dark:bg-[#131722] dark:text-indigo-300"
+                              >
+                                {z.zone} ({z.widthCm}×{z.heightCm}см •{' '}
+                                {calc.meters}м
+                                {canViewCost
+                                  ? ` • собів. +${calc.costPerUnit.toFixed(1)}${currencySymbol}`
+                                  : ''}
+                                )
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveDtfZone(idx, zIdx)}
+                                  className="text-slate-400 hover:text-red-500"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </span>
+                            );
+                          })}
+                        </div>
+
                         {printOptions.length > 0 && (
                           <div className="flex flex-wrap gap-1.5">
                             {printOptions.map((opt) => {

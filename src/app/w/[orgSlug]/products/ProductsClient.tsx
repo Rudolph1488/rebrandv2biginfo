@@ -3,6 +3,10 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import {
+  DEFAULT_DTF_SETTINGS,
+  type DtfRollSettings,
+} from '@/lib/dtfCalculator';
 import type {
   Organization,
   PrintOptionRecord,
@@ -51,6 +55,12 @@ export default function ProductsClient({
   const [optPrice, setOptPrice] = useState('150');
   const [optCost, setOptCost] = useState('50');
   const [savingOpt, setSavingOpt] = useState(false);
+  const [dtfSettings, setDtfSettings] = useState<DtfRollSettings>({
+    ...DEFAULT_DTF_SETTINGS,
+    ...(org.dtf_settings || {}),
+  });
+  const [savingDtf, setSavingDtf] = useState(false);
+  const [dtfSavedMsg, setDtfSavedMsg] = useState(false);
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -211,6 +221,23 @@ export default function ProductsClient({
     }
   }
 
+  async function handleSaveDtfSettings(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingDtf(true);
+    setDtfSavedMsg(false);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from('organizations')
+      .update({ dtf_settings: dtfSettings })
+      .eq('id', org.id);
+    setSavingDtf(false);
+    if (!error) {
+      setDtfSavedMsg(true);
+      setTimeout(() => setDtfSavedMsg(false), 2500);
+      router.refresh();
+    }
+  }
+
   const inputCls =
     'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-900 dark:border-white/10 dark:bg-white/5 dark:text-white dark:focus:border-white/40';
 
@@ -272,11 +299,131 @@ export default function ProductsClient({
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
               Виконай SQL-міграцію{' '}
               <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs dark:bg-amber-500/20">
-                0010_print_options.sql
+                0011_dtf_roll_calculator.sql
               </code>{' '}
               у Supabase → SQL Editor.
             </div>
           )}
+
+          {/* DTF Roll Calculator Settings */}
+          <form
+            onSubmit={handleSaveDtfSettings}
+            className="rounded-2xl border border-indigo-200/80 bg-indigo-50/40 p-4 shadow-2xs dark:border-indigo-500/20 dark:bg-indigo-500/5"
+          >
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Калькулятор DTF-рулону (авторозрахунок собівартості)
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Система автоматично розкладає принти на ширину рулону з урахуванням відступів і тиражу
+                </p>
+              </div>
+              {dtfSavedMsg && (
+                <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                  ✓ Налаштування збережено
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                  Ширина рулону (см)
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  value={dtfSettings.roll_width_cm}
+                  onChange={(e) =>
+                    setDtfSettings({
+                      ...dtfSettings,
+                      roll_width_cm: Number(e.target.value),
+                    })
+                  }
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                  Ціна за 1 м.п. ({currencySymbol})
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  value={dtfSettings.price_per_meter}
+                  onChange={(e) =>
+                    setDtfSettings({
+                      ...dtfSettings,
+                      price_per_meter: Number(e.target.value),
+                    })
+                  }
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                  Відступ між принт. (см)
+                </label>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={dtfSettings.gap_cm}
+                  onChange={(e) =>
+                    setDtfSettings({
+                      ...dtfSettings,
+                      gap_cm: Number(e.target.value),
+                    })
+                  }
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                  Прес / перенос ({currencySymbol}/шт)
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  value={dtfSettings.press_cost_per_print}
+                  onChange={(e) =>
+                    setDtfSettings({
+                      ...dtfSettings,
+                      press_cost_per_print: Number(e.target.value),
+                    })
+                  }
+                  className={inputCls}
+                />
+              </div>
+              <div className="col-span-2 flex items-end gap-2 sm:col-span-1">
+                <div className="flex-1">
+                  <label className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                    Націнка (×)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={dtfSettings.markup_multiplier}
+                    onChange={(e) =>
+                      setDtfSettings({
+                        ...dtfSettings,
+                        markup_multiplier: Number(e.target.value),
+                      })
+                    }
+                    className={inputCls}
+                  />
+                </div>
+                {canManage && (
+                  <button
+                    type="submit"
+                    disabled={savingDtf}
+                    className="h-[42px] shrink-0 rounded-xl bg-indigo-600 px-3.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                  >
+                    {savingDtf ? '...' : 'Зберегти'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </form>
 
           {canManage && (
             <form
