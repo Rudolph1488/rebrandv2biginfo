@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { requireOrgAccess } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import {
@@ -18,7 +19,19 @@ export default async function WorkspaceDashboardPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const { org, isAdmin, permissions } = await requireOrgAccess(orgSlug);
+  const { membership, org, isAdmin, permissions } =
+    await requireOrgAccess(orgSlug);
+
+  if (
+    membership.role === 'producer' ||
+    (!isAdmin &&
+      !permissions.orders &&
+      !permissions.cashflow &&
+      Boolean(permissions.production))
+  ) {
+    redirect(`/w/${org.slug}/production`);
+  }
+
   const supabase = await createClient();
 
   const canViewCost = isAdmin || permissions.view_cost_price;

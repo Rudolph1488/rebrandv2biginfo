@@ -15,6 +15,15 @@ export default async function HomePage() {
     if (!first.organization.onboarding_completed && isAdmin) {
       redirect(`/onboarding/${first.organization.slug}`);
     }
+    if (
+      first.role === 'producer' ||
+      (!isAdmin &&
+        !first.permissions?.orders &&
+        !first.permissions?.cashflow &&
+        Boolean(first.permissions?.production))
+    ) {
+      redirect(`/w/${first.organization.slug}/production`);
+    }
     redirect(`/w/${first.organization.slug}`);
   }
 

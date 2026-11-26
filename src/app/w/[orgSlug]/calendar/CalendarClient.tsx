@@ -51,25 +51,36 @@ function formatUaDate(dateStr: string): string {
   return `${d}.${m}.${y}`;
 }
 
+export interface CalendarOrder extends OrderRecord {
+  order_items?: Array<{
+    id: string;
+    name: string;
+    qty: number;
+    attributes?: Record<string, string> | null;
+  }>;
+}
+
 export default function CalendarClient({
   org,
   statuses,
   initialScheduled,
   initialUnscheduled,
+  canManageOrders = true,
   migrationMissing = false,
 }: {
   org: Organization;
   statuses: OrderStatus[];
-  initialScheduled: OrderRecord[];
-  initialUnscheduled: OrderRecord[];
+  initialScheduled: CalendarOrder[];
+  initialUnscheduled: CalendarOrder[];
+  canManageOrders?: boolean;
   migrationMissing?: boolean;
 }) {
   const router = useRouter();
   const todayKey = useMemo(() => toDateKey(new Date()), []);
 
-  const [scheduled, setScheduled] = useState<OrderRecord[]>(initialScheduled);
+  const [scheduled, setScheduled] = useState<CalendarOrder[]>(initialScheduled);
   const [unscheduled, setUnscheduled] =
-    useState<OrderRecord[]>(initialUnscheduled);
+    useState<CalendarOrder[]>(initialUnscheduled);
 
   const [viewDate, setViewDate] = useState(() => {
     const now = new Date();
@@ -77,7 +88,9 @@ export default function CalendarClient({
   });
   const [selectedDate, setSelectedDate] = useState<string>(todayKey);
   const [activeTab, setActiveTab] = useState<'day' | 'overdue' | 'unscheduled'>(
-    initialScheduled.length === 0 && initialUnscheduled.length > 0
+    canManageOrders &&
+      initialScheduled.length === 0 &&
+      initialUnscheduled.length > 0
       ? 'unscheduled'
       : 'day'
   );
@@ -302,13 +315,23 @@ export default function CalendarClient({
           </p>
         </div>
 
-        <Link
-          href={`/w/${org.slug}/orders?new=1`}
-          className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-xs transition hover:opacity-90"
-          style={{ backgroundColor: org.primary_color }}
-        >
-          <Plus className="h-4 w-4" /> Нове замовлення
-        </Link>
+        {canManageOrders ? (
+          <Link
+            href={`/w/${org.slug}/orders?new=1`}
+            className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-xs transition hover:opacity-90"
+            style={{ backgroundColor: org.primary_color }}
+          >
+            <Plus className="h-4 w-4" /> Нове замовлення
+          </Link>
+        ) : (
+          <Link
+            href={`/w/${org.slug}/production`}
+            className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-xs transition hover:opacity-90"
+            style={{ backgroundColor: org.primary_color }}
+          >
+            Відкрити Виробництво →
+          </Link>
+        )}
       </div>
 
       {/* KPI Summary Strip */}
@@ -594,17 +617,19 @@ export default function CalendarClient({
             >
               Простр. ({overdueOrders.length})
             </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('unscheduled')}
-              className={`flex-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
-                activeTab === 'unscheduled'
-                  ? 'bg-white text-slate-900 shadow-2xs dark:bg-white/10 dark:text-white'
-                  : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
-              }`}
-            >
-              Створені ({unscheduledActive.length})
-            </button>
+            {canManageOrders && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('unscheduled')}
+                className={`flex-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                  activeTab === 'unscheduled'
+                    ? 'bg-white text-slate-900 shadow-2xs dark:bg-white/10 dark:text-white'
+                    : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
+                }`}
+              >
+                Створені ({unscheduledActive.length})
+              </button>
+            )}
           </div>
 
           {/* Search inside agenda */}
@@ -653,39 +678,83 @@ export default function CalendarClient({
                 return (
                   <div
                     key={o.id}
-                    draggable
-                    onDragStart={() => setDraggedOrderId(o.id)}
+                    draggable={canManageOrders}
+                    onDragStart={() => {
+                      if (canManageOrders) setDraggedOrderId(o.id);
+                    }}
                     onDragEnd={() => {
                       setDraggedOrderId(null);
                       setDragOverDate(null);
                     }}
-                    className="cursor-grab space-y-2.5 rounded-2xl border border-slate-200/80 bg-slate-50/60 p-3.5 transition hover:border-indigo-300 active:cursor-grabbing dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-indigo-500/40"
+                    className={`space-y-2.5 rounded-2xl border border-slate-200/80 bg-slate-50/60 p-3.5 transition dark:border-white/10 dark:bg-white/[0.03] ${
+                      canManageOrders
+                        ? 'cursor-grab hover:border-indigo-300 active:cursor-grabbing dark:hover:border-indigo-500/40'
+                        : ''
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-start gap-2">
-                        <GripVertical className="mt-0.5 h-4 w-4 shrink-0 text-slate-300 dark:text-slate-600" />
+                        {canManageOrders && (
+                          <GripVertical className="mt-0.5 h-4 w-4 shrink-0 text-slate-300 dark:text-slate-600" />
+                        )}
                         <div>
-                          <Link
-                            href={`/w/${org.slug}/orders/${o.id}`}
-                            className="inline-flex items-center gap-1 font-mono text-sm font-bold text-slate-900 hover:text-indigo-600 dark:text-white dark:hover:text-indigo-400"
-                          >
-                            #{o.order_number}
-                            <ExternalLink className="h-3 w-3 opacity-60" />
-                          </Link>
-                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                            {o.client?.contact_person || 'Без клієнта'}
-                          </p>
-                          {o.client?.phone && (
-                            <p className="text-[11px] text-slate-500">
-                              {o.client.phone}
-                            </p>
+                          {canManageOrders ? (
+                            <Link
+                              href={`/w/${org.slug}/orders/${o.id}`}
+                              className="inline-flex items-center gap-1 font-mono text-sm font-bold text-slate-900 hover:text-indigo-600 dark:text-white dark:hover:text-indigo-400"
+                            >
+                              #{o.order_number}
+                              <ExternalLink className="h-3 w-3 opacity-60" />
+                            </Link>
+                          ) : (
+                            <span className="font-mono text-sm font-bold text-slate-900 dark:text-white">
+                              #{o.order_number}
+                            </span>
+                          )}
+                          {canManageOrders && (
+                            <>
+                              <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                                {o.client?.contact_person || 'Без клієнта'}
+                              </p>
+                              {o.client?.phone && (
+                                <p className="text-[11px] text-slate-500">
+                                  {o.client.phone}
+                                </p>
+                              )}
+                            </>
                           )}
                         </div>
                       </div>
-                      <span className="font-mono text-xs font-bold tabular-nums text-slate-900 dark:text-white">
-                        {Number(o.total_amount).toFixed(0)} {currencySymbol}
-                      </span>
+                      {canManageOrders && (
+                        <span className="font-mono text-xs font-bold tabular-nums text-slate-900 dark:text-white">
+                          {Number(o.total_amount).toFixed(0)} {currencySymbol}
+                        </span>
+                      )}
                     </div>
+
+                    {o.order_items && o.order_items.length > 0 && (
+                      <div className="space-y-1 rounded-xl bg-white/80 p-2 text-[11px] dark:bg-white/[0.03]">
+                        {o.order_items.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between gap-2"
+                          >
+                            <span className="truncate font-medium text-slate-800 dark:text-slate-200">
+                              {item.name}
+                            </span>
+                            <span className="shrink-0 font-mono font-bold text-slate-700 dark:text-slate-300">
+                              × {item.qty}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {o.notes && (
+                      <p className="rounded-lg bg-amber-50/70 px-2.5 py-1.5 text-[11px] text-slate-700 dark:bg-amber-500/10 dark:text-slate-300">
+                        {o.notes}
+                      </p>
+                    )}
 
                     {(o.delivery_city || o.ttn) && (
                       <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
@@ -719,6 +788,7 @@ export default function CalendarClient({
                     )}
 
                     {/* Status + Deadline Controls */}
+                    {canManageOrders && (
                     <div className="flex flex-wrap items-center gap-2 pt-1">
                       <select
                         value={o.status_id || ''}
@@ -779,6 +849,7 @@ export default function CalendarClient({
                         </div>
                       )}
                     </div>
+                    )}
                   </div>
                 );
               })

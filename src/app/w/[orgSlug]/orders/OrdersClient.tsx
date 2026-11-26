@@ -694,17 +694,34 @@ export default function OrdersClient({
                           const isOverdue = !st.is_final && ord.deadline < todayStr;
                           const isToday = ord.deadline === todayStr;
                           return (
-                            <p
-                              className={`mt-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold ${isOverdue
-                                ? 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400'
-                                : isToday
-                                  ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'
-                                  : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300'
+                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                              <span
+                                className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[10px] font-semibold ${isOverdue
+                                  ? 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400'
+                                  : isToday
+                                    ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'
+                                    : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300'
+                                  }`}
+                              >
+                                <CalendarDays className="h-2.5 w-2.5" />
+                                {ord.deadline.split('-').reverse().join('.')}
+                              </span>
+                              <span
+                                className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
+                                  ord.production_status === 'done'
+                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+                                    : ord.production_status === 'in_progress'
+                                      ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400'
+                                      : 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'
                                 }`}
-                            >
-                              <CalendarDays className="h-2.5 w-2.5" />
-                              {ord.deadline.split('-').reverse().join('.')}
-                            </p>
+                              >
+                                {ord.production_status === 'done'
+                                  ? 'Вироблено ✓'
+                                  : ord.production_status === 'in_progress'
+                                    ? 'У виробництві'
+                                    : 'Черга вир.'}
+                              </span>
+                            </div>
                           );
                         })()}
 

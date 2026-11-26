@@ -100,6 +100,12 @@ export interface OrderRecord {
   created_at: string;
   client?: { id: string; contact_person: string; phone: string | null } | null;
   status?: OrderStatus | null;
+  order_items?: Array<{
+    id: string;
+    name: string;
+    qty: number;
+    attributes?: Record<string, string> | null;
+  }>;
 }
 
 export interface CashflowRecord {
