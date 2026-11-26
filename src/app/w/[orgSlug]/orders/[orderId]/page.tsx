@@ -30,7 +30,7 @@ export default async function OrderDetailPage({
       supabase
         .from('orders')
         .select(
-          'id, org_id, order_number, status_id, client_id, warehouse_id, stock_deducted, source_name, total_amount, total_cost, ttn, delivery_city, delivery_warehouse, notes, deadline, production_status, created_at, client:clients(id, contact_person, phone, company_name)'
+          'id, org_id, order_number, status_id, client_id, warehouse_id, stock_deducted, source_name, total_amount, total_cost, ttn, delivery_city, delivery_warehouse, notes, deadline, production_status, production_elapsed_seconds, created_at, client:clients(id, contact_person, phone, company_name)'
         )
         .eq('id', orderId)
         .eq('org_id', org.id)

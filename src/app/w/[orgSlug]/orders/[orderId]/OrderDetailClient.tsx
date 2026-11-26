@@ -950,6 +950,12 @@ export default function OrderDetailClient({
                     : order.production_status === 'in_progress'
                       ? 'У виробництві'
                       : 'Заявка на виробництво'}
+                  {(order.production_elapsed_seconds || 0) > 0 && (() => {
+                    const sec = Number(order.production_elapsed_seconds) || 0;
+                    const h = Math.floor(sec / 3600);
+                    const m = Math.floor((sec % 3600) / 60);
+                    return ` (${h > 0 ? `${h}г ` : ''}${m}хв)`;
+                  })()}
                 </span>
               )}
             </div>

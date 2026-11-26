@@ -97,6 +97,8 @@ export interface OrderRecord {
   production_accepted_by?: string | null;
   production_accepted_at?: string | null;
   production_completed_at?: string | null;
+  production_elapsed_seconds?: number;
+  production_timer_started_at?: string | null;
   created_at: string;
   client?: { id: string; contact_person: string; phone: string | null } | null;
   status?: OrderStatus | null;

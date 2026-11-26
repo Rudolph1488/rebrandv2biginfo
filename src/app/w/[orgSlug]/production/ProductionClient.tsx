@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { OrderStatus, Organization } from '@/types/crm';
@@ -12,9 +12,11 @@ import {
   Factory,
   Loader2,
   Package,
+  Pause,
   Play,
   RotateCcw,
   Search,
+  Timer,
   UserCheck,
   X,
 } from 'lucide-react';
@@ -31,6 +33,8 @@ export interface ProductionOrderRow {
   production_accepted_by: string | null;
   production_accepted_at: string | null;
   production_completed_at: string | null;
+  production_elapsed_seconds?: number;
+  production_timer_started_at?: string | null;
   created_at: string;
   order_items: Array<{
     id: string;
@@ -38,6 +42,14 @@ export interface ProductionOrderRow {
     qty: number;
     attributes?: Record<string, string> | null;
   }>;
+}
+
+function formatDuration(totalSeconds: number): string {
+  const sec = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
 function formatUaDate(dateStr: string): string {
@@ -70,6 +82,18 @@ export default function ProductionClient({
   const [search, setSearch] = useState('');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  const hasRunningTimer = useMemo(
+    () => orders.some((o) => Boolean(o.production_timer_started_at)),
+    [orders]
+  );
+
+  useEffect(() => {
+    if (!hasRunningTimer) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [hasRunningTimer]);
 
   const statusMap = useMemo(() => {
     const map = new Map<string, OrderStatus>();
@@ -108,9 +132,9 @@ export default function ProductionClient({
     });
   }, [orders, filter, search]);
 
-  async function updateProductionStatus(
+  async function runProductionAction(
     orderId: string,
-    nextStatus: 'pending' | 'in_progress' | 'done'
+    action: 'start' | 'pause' | 'resume' | 'done' | 'reopen'
   ) {
     setUpdatingId(orderId);
     setErrorMsg(null);
@@ -122,7 +146,7 @@ export default function ProductionClient({
       body: JSON.stringify({
         orgId: org.id,
         orderId,
-        productionStatus: nextStatus,
+        action,
       }),
     });
     const data = await res.json();
@@ -139,15 +163,22 @@ export default function ProductionClient({
           ? {
               ...o,
               status_id: data.statusId ?? o.status_id,
-              production_status: nextStatus,
+              production_status: data.productionStatus ?? o.production_status,
+              production_elapsed_seconds:
+                data.elapsedSeconds ?? o.production_elapsed_seconds,
+              production_timer_started_at:
+                data.timerStartedAt !== undefined
+                  ? data.timerStartedAt
+                  : o.production_timer_started_at,
               production_accepted_by:
-                nextStatus === 'in_progress'
+                action === 'start' || action === 'reopen'
                   ? currentUserId
                   : o.production_accepted_by,
               production_accepted_at:
-                nextStatus === 'in_progress' ? now : o.production_accepted_at,
-              production_completed_at:
-                nextStatus === 'done' ? now : null,
+                action === 'start' || action === 'reopen'
+                  ? now
+                  : o.production_accepted_at,
+              production_completed_at: action === 'done' ? now : null,
             }
           : o
       )
@@ -436,16 +467,24 @@ export default function ProductionClient({
 
                 {/* Action Footer */}
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3.5 dark:border-white/10">
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                     {o.production_status === 'pending' && (
                       <span className="font-medium text-amber-600 dark:text-amber-400">
                         Очікує прийняття
                       </span>
                     )}
                     {o.production_status === 'in_progress' && (
-                      <span className="inline-flex items-center gap-1 font-medium text-indigo-600 dark:text-indigo-400">
+                      <span
+                        className={`inline-flex items-center gap-1 font-medium ${
+                          o.production_timer_started_at
+                            ? 'text-indigo-600 dark:text-indigo-400'
+                            : 'text-amber-600 dark:text-amber-400'
+                        }`}
+                      >
                         <UserCheck className="h-3.5 w-3.5" />
-                        В роботі ({acceptedName})
+                        {o.production_timer_started_at
+                          ? `В роботі (${acceptedName})`
+                          : `На паузі (${acceptedName})`}
                       </span>
                     )}
                     {o.production_status === 'done' && (
@@ -454,14 +493,44 @@ export default function ProductionClient({
                         Вироблено {acceptedName ? `(${acceptedName})` : ''}
                       </span>
                     )}
+
+                    {(o.production_status !== 'pending' ||
+                      (o.production_elapsed_seconds || 0) > 0) && (() => {
+                      const baseSec = Number(o.production_elapsed_seconds) || 0;
+                      const liveDelta = o.production_timer_started_at
+                        ? Math.max(
+                            0,
+                            Math.floor(
+                              (nowMs -
+                                new Date(
+                                  o.production_timer_started_at
+                                ).getTime()) /
+                                1000
+                            )
+                          )
+                        : 0;
+                      const totalSec = baseSec + liveDelta;
+                      return (
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-[11px] font-bold tabular-nums ${
+                            o.production_timer_started_at
+                              ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300'
+                              : 'bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-300'
+                          }`}
+                        >
+                          <Timer className="h-3 w-3" />
+                          {formatDuration(totalSec)}
+                        </span>
+                      );
+                    })()}
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {o.production_status === 'pending' && (
                       <button
                         type="button"
                         disabled={updatingId === o.id}
-                        onClick={() => updateProductionStatus(o.id, 'in_progress')}
+                        onClick={() => runProductionAction(o.id, 'start')}
                         className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-2xs hover:bg-indigo-700 disabled:opacity-50"
                       >
                         {updatingId === o.id ? (
@@ -474,26 +543,49 @@ export default function ProductionClient({
                     )}
 
                     {o.production_status === 'in_progress' && (
-                      <button
-                        type="button"
-                        disabled={updatingId === o.id}
-                        onClick={() => updateProductionStatus(o.id, 'done')}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-2xs hover:bg-emerald-700 disabled:opacity-50"
-                      >
-                        {updatingId === o.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <>
+                        {o.production_timer_started_at ? (
+                          <button
+                            type="button"
+                            disabled={updatingId === o.id}
+                            onClick={() => runProductionAction(o.id, 'pause')}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300"
+                          >
+                            <Pause className="h-3.5 w-3.5" />
+                            Пауза
+                          </button>
                         ) : (
-                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          <button
+                            type="button"
+                            disabled={updatingId === o.id}
+                            onClick={() => runProductionAction(o.id, 'resume')}
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            <Play className="h-3.5 w-3.5" />
+                            Продовжити
+                          </button>
                         )}
-                        Готово (Вироблено)
-                      </button>
+                        <button
+                          type="button"
+                          disabled={updatingId === o.id}
+                          onClick={() => runProductionAction(o.id, 'done')}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-2xs hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          {updatingId === o.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                          )}
+                          Готово (Вироблено)
+                        </button>
+                      </>
                     )}
 
                     {o.production_status === 'done' && (
                       <button
                         type="button"
                         disabled={updatingId === o.id}
-                        onClick={() => updateProductionStatus(o.id, 'in_progress')}
+                        onClick={() => runProductionAction(o.id, 'reopen')}
                         className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/5"
                       >
                         <RotateCcw className="h-3 w-3" /> Повернути в роботу

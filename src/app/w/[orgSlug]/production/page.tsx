@@ -47,7 +47,7 @@ export default async function ProductionPage({
       ? await supabase
           .from('orders')
           .select(
-            'id, order_number, status_id, deadline, notes, ttn, delivery_city, production_status, production_accepted_by, production_accepted_at, production_completed_at, created_at, order_items(id, name, qty, attributes)'
+            'id, order_number, status_id, deadline, notes, ttn, delivery_city, production_status, production_accepted_by, production_accepted_at, production_completed_at, production_elapsed_seconds, production_timer_started_at, created_at, order_items(id, name, qty, attributes)'
           )
           .eq('org_id', org.id)
           .in('status_id', productionStageIds)

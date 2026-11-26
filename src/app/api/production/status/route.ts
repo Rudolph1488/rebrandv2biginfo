@@ -10,11 +10,21 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { orgId, orderId, productionStatus } = (await request.json()) as {
+    const body = (await request.json()) as {
       orgId: string;
       orderId: string;
-      productionStatus: 'pending' | 'in_progress' | 'done';
+      productionStatus?: 'pending' | 'in_progress' | 'done';
+      action?: 'start' | 'pause' | 'resume' | 'done' | 'reopen';
     };
+
+    const { orgId, orderId } = body;
+    const action =
+      body.action ||
+      (body.productionStatus === 'done'
+        ? 'done'
+        : body.productionStatus === 'in_progress'
+          ? 'start'
+          : 'reopen');
 
     const membership = ctx.memberships.find((m) => m.org_id === orgId);
     const hasAccess =
@@ -30,10 +40,13 @@ export async function POST(request: Request) {
 
     const admin = createAdminClient();
     const now = new Date().toISOString();
+    const nowMs = Date.now();
 
     const { data: order } = await admin
       .from('orders')
-      .select('id, order_number, status_id')
+      .select(
+        'id, order_number, status_id, production_status, production_elapsed_seconds, production_timer_started_at'
+      )
       .eq('id', orderId)
       .eq('org_id', orgId)
       .single();
@@ -42,9 +55,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Замовлення не знайдено' }, { status: 404 });
     }
 
-    let nextStatusId = order.status_id;
+    const prevElapsed = Number(order.production_elapsed_seconds) || 0;
+    const activeDelta = order.production_timer_started_at
+      ? Math.max(
+          0,
+          Math.floor(
+            (nowMs - new Date(order.production_timer_started_at).getTime()) /
+              1000
+          )
+        )
+      : 0;
 
-    if (productionStatus === 'in_progress') {
+    let nextStatusId = order.status_id;
+    let nextProductionStatus: 'pending' | 'in_progress' | 'done' =
+      (order.production_status as 'pending' | 'in_progress' | 'done') ||
+      'pending';
+    let nextElapsed = prevElapsed;
+    let nextTimerStartedAt: string | null = order.production_timer_started_at;
+
+    const patch: Record<string, unknown> = {
+      updated_at: now,
+    };
+
+    if (action === 'start' || action === 'reopen') {
       const { data: stages } = await admin
         .from('order_statuses')
         .select('id, name, is_final')
@@ -56,23 +89,36 @@ export async function POST(request: Request) {
       );
       if (inWorkStage) {
         nextStatusId = inWorkStage.id;
+        patch.status_id = inWorkStage.id;
       }
-    }
 
-    const patch: Record<string, unknown> = {
-      production_status: productionStatus,
-      updated_at: now,
-    };
-
-    if (productionStatus === 'in_progress') {
+      nextProductionStatus = 'in_progress';
+      nextTimerStartedAt = now;
+      patch.production_status = 'in_progress';
       patch.production_accepted_by = ctx.user.id;
       patch.production_accepted_at = now;
       patch.production_completed_at = null;
-      if (nextStatusId) patch.status_id = nextStatusId;
-    } else if (productionStatus === 'done') {
+      patch.production_timer_started_at = now;
+    } else if (action === 'pause') {
+      nextProductionStatus = 'in_progress';
+      nextElapsed = prevElapsed + activeDelta;
+      nextTimerStartedAt = null;
+      patch.production_status = 'in_progress';
+      patch.production_elapsed_seconds = nextElapsed;
+      patch.production_timer_started_at = null;
+    } else if (action === 'resume') {
+      nextProductionStatus = 'in_progress';
+      nextTimerStartedAt = now;
+      patch.production_status = 'in_progress';
+      patch.production_timer_started_at = now;
+    } else if (action === 'done') {
+      nextProductionStatus = 'done';
+      nextElapsed = prevElapsed + activeDelta;
+      nextTimerStartedAt = null;
+      patch.production_status = 'done';
+      patch.production_elapsed_seconds = nextElapsed;
+      patch.production_timer_started_at = null;
       patch.production_completed_at = now;
-    } else {
-      patch.production_completed_at = null;
     }
 
     const { error: updErr } = await admin
@@ -85,7 +131,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: updErr.message }, { status: 500 });
     }
 
-    if (productionStatus === 'done') {
+    if (action === 'done') {
       await sendOrgPushNotification({
         orgId,
         targetPermission: 'orders',
@@ -98,7 +144,13 @@ export async function POST(request: Request) {
       });
     }
 
-    return NextResponse.json({ ok: true, statusId: nextStatusId });
+    return NextResponse.json({
+      ok: true,
+      statusId: nextStatusId,
+      productionStatus: nextProductionStatus,
+      elapsedSeconds: nextElapsed,
+      timerStartedAt: nextTimerStartedAt,
+    });
   } catch (err) {
     console.error('Production status update error:', err);
     return NextResponse.json(

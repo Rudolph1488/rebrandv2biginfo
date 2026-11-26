@@ -51,13 +51,24 @@ export default function WorkspaceSidebar({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const isAdmin = role === 'owner' || role === 'admin' || isSuperAdmin;
+  const isProducerOnly =
+    role === 'producer' ||
+    (!isAdmin &&
+      !permissions.orders &&
+      !permissions.cashflow &&
+      Boolean(permissions.production));
   const base = `/w/${org.slug}`;
 
   const sections = [
     {
       title: 'Операційка',
       items: [
-        { label: 'Огляд', href: base, icon: LayoutDashboard, visible: true },
+        {
+          label: 'Огляд',
+          href: base,
+          icon: LayoutDashboard,
+          visible: !isProducerOnly,
+        },
         {
           label: 'Замовлення',
           href: `${base}/orders`,
@@ -139,28 +150,43 @@ export default function WorkspaceSidebar({
     },
   ];
 
-  // Primary 4 tabs for mobile bottom bar
-  const mobileTabs = [
-    { label: 'Огляд', href: base, icon: LayoutDashboard, visible: true },
-    {
-      label: 'Замовлення',
-      href: `${base}/orders`,
-      icon: ShoppingCart,
-      visible: isAdmin || permissions.orders,
-    },
-    {
-      label: 'Клієнти',
-      href: `${base}/clients`,
-      icon: Users,
-      visible: isAdmin || permissions.clients,
-    },
-    {
-      label: 'Склади',
-      href: `${base}/warehouses`,
-      icon: Warehouse,
-      visible: isAdmin || Boolean(permissions.warehouses),
-    },
-  ].filter((t) => t.visible);
+  // Primary tabs for mobile bottom bar
+  const mobileTabs = isProducerOnly
+    ? [
+        {
+          label: 'Виробництво',
+          href: `${base}/production`,
+          icon: Factory,
+          visible: true,
+        },
+        {
+          label: 'Календар',
+          href: `${base}/calendar`,
+          icon: CalendarDays,
+          visible: true,
+        },
+      ]
+    : [
+        { label: 'Огляд', href: base, icon: LayoutDashboard, visible: true },
+        {
+          label: 'Замовлення',
+          href: `${base}/orders`,
+          icon: ShoppingCart,
+          visible: isAdmin || permissions.orders,
+        },
+        {
+          label: 'Клієнти',
+          href: `${base}/clients`,
+          icon: Users,
+          visible: isAdmin || permissions.clients,
+        },
+        {
+          label: 'Склади',
+          href: `${base}/warehouses`,
+          icon: Warehouse,
+          visible: isAdmin || Boolean(permissions.warehouses),
+        },
+      ].filter((t) => t.visible);
 
   async function handleLogout() {
     const supabase = createClient();
