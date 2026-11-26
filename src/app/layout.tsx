@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { PwaRegister } from "@/components/PwaRegister";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,6 +17,21 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "CENTRUM CRM — Робочий простір",
   description: "Мультитенантна CRM-система для управління бізнесом",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "CENTRUM CRM",
+  },
+  icons: {
+    icon: "/android-chrome-192x192.png",
+    apple: "/android-chrome-192x192.png",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#090b10",
+  width: "device-width",
+  initialScale: 1,
 };
 
 const themeInitScript = `
@@ -39,6 +55,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-full flex flex-col bg-[#f8f9fb] text-slate-900 dark:bg-[#090b10] dark:text-slate-100">
+        <PwaRegister />
         <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
