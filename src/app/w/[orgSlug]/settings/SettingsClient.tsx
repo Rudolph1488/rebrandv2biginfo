@@ -20,6 +20,9 @@ import {
   Loader2,
   Trash2,
   Upload,
+  GripVertical,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 
 interface MemberRow {
@@ -97,15 +100,33 @@ export default function SettingsClient({
   const [brandSavedMsg, setBrandSavedMsg] = useState(false);
 
   // Kanban state
-  const [statuses, setStatuses] = useState(
+  const [statuses, setStatuses] = useState<
+    Array<{ id?: string; name: string; color: string; is_final: boolean }>
+  >(
     initialStatuses.map((s) => ({
+      id: s.id,
       name: s.name,
       color: s.color,
       is_final: s.is_final,
     }))
   );
+  const [dragStageIdx, setDragStageIdx] = useState<number | null>(null);
   const [savingKanban, setSavingKanban] = useState(false);
   const [kanbanSavedMsg, setKanbanSavedMsg] = useState(false);
+
+  function moveStage(fromIdx: number, toIdx: number) {
+    if (
+      fromIdx === toIdx ||
+      toIdx < 0 ||
+      toIdx >= statuses.length
+    ) {
+      return;
+    }
+    const next = [...statuses];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    setStatuses(next);
+  }
 
   // Team state
   const [members, setMembers] = useState<MemberRow[]>(initialMembers);
@@ -172,19 +193,50 @@ export default function SettingsClient({
     setSavingKanban(true);
     setKanbanSavedMsg(false);
     const supabase = createClient();
-    await supabase.from('order_statuses').delete().eq('org_id', org.id);
-    if (statuses.length > 0) {
-      await supabase.from('order_statuses').insert(
-        statuses.map((s, idx) => ({
-          org_id: org.id,
-          name: s.name.trim() || `Етап ${idx + 1}`,
-          slug: `stage_${idx + 1}`,
-          color: s.color || '#64748b',
-          position: idx,
-          is_final: Boolean(s.is_final),
-        }))
-      );
+
+    const keptIds = new Set(statuses.map((s) => s.id).filter(Boolean));
+    const removedIds = initialStatuses
+      .map((s) => s.id)
+      .filter((id) => !keptIds.has(id));
+
+    if (removedIds.length > 0) {
+      await supabase
+        .from('order_statuses')
+        .delete()
+        .eq('org_id', org.id)
+        .in('id', removedIds);
     }
+
+    const updatedStatuses = [...statuses];
+    for (let idx = 0; idx < updatedStatuses.length; idx++) {
+      const s = updatedStatuses[idx];
+      const payload = {
+        name: s.name.trim() || `Етап ${idx + 1}`,
+        slug: `stage_${idx + 1}`,
+        color: s.color || '#64748b',
+        position: idx,
+        is_final: Boolean(s.is_final),
+      };
+
+      if (s.id) {
+        await supabase
+          .from('order_statuses')
+          .update(payload)
+          .eq('id', s.id)
+          .eq('org_id', org.id);
+      } else {
+        const { data: inserted } = await supabase
+          .from('order_statuses')
+          .insert({ org_id: org.id, ...payload })
+          .select('id')
+          .single();
+        if (inserted) {
+          updatedStatuses[idx] = { ...s, id: inserted.id };
+        }
+      }
+    }
+
+    setStatuses(updatedStatuses);
     setSavingKanban(false);
     setKanbanSavedMsg(true);
     setTimeout(() => setKanbanSavedMsg(false), 2500);
@@ -495,9 +547,29 @@ export default function SettingsClient({
           <div className="space-y-2">
             {statuses.map((st, idx) => (
               <div
-                key={idx}
-                className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]"
+                key={st.id || `new-${idx}`}
+                draggable
+                onDragStart={() => setDragStageIdx(idx)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => {
+                  if (dragStageIdx !== null) {
+                    moveStage(dragStageIdx, idx);
+                    setDragStageIdx(null);
+                  }
+                }}
+                onDragEnd={() => setDragStageIdx(null)}
+                className={`flex items-center gap-2 rounded-xl border bg-slate-50/50 px-3 py-2 transition dark:bg-white/[0.03] ${
+                  dragStageIdx === idx
+                    ? 'border-indigo-400 opacity-60 dark:border-indigo-500'
+                    : 'border-slate-200 dark:border-white/10'
+                }`}
               >
+                <span
+                  className="cursor-grab text-slate-400 active:cursor-grabbing"
+                  title="Перетягніть для зміни порядку"
+                >
+                  <GripVertical className="h-4 w-4" />
+                </span>
                 <input
                   type="color"
                   value={st.color}
@@ -518,6 +590,26 @@ export default function SettingsClient({
                   }}
                   className="flex-1 bg-transparent text-sm font-medium text-slate-900 outline-none dark:text-white"
                 />
+                <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    disabled={idx === 0}
+                    onClick={() => moveStage(idx, idx - 1)}
+                    title="Вгору"
+                    className="rounded-lg p-1 text-slate-400 hover:bg-slate-200/70 hover:text-slate-700 disabled:opacity-30 dark:hover:bg-white/10"
+                  >
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={idx === statuses.length - 1}
+                    onClick={() => moveStage(idx, idx + 1)}
+                    title="Вниз"
+                    className="rounded-lg p-1 text-slate-400 hover:bg-slate-200/70 hover:text-slate-700 disabled:opacity-30 dark:hover:bg-white/10"
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  </button>
+                </div>
                 <label className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                   <input
                     type="checkbox"
