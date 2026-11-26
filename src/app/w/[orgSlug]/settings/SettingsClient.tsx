@@ -141,6 +141,28 @@ export default function SettingsClient({
     'admin' | 'manager' | 'producer' | 'viewer'
   >('manager');
   const [inviting, setInviting] = useState(false);
+  const [testingPush, setTestingPush] = useState(false);
+  const [pushTestMsg, setPushTestMsg] = useState<string | null>(null);
+
+  async function handleTestPush() {
+    setTestingPush(true);
+    setPushTestMsg(null);
+    const res = await fetch('/api/notifications/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgId: org.id, orgSlug: org.slug }),
+    });
+    const data = await res.json();
+    setTestingPush(false);
+    if (res.ok && data.sent > 0) {
+      setPushTestMsg(`Надіслано на ${data.sent} пристр.`);
+    } else if (res.ok) {
+      setPushTestMsg('Немає активних підписок на цьому пристрої');
+    } else {
+      setPushTestMsg(data.error || 'Помилка відправки');
+    }
+    setTimeout(() => setPushTestMsg(null), 4000);
+  }
 
   // Integrations state
   const [channels, setChannels] = useState<ChannelRow[]>(initialChannels);
@@ -676,6 +698,31 @@ export default function SettingsClient({
       {/* TAB 3: TEAM & PERMISSIONS */}
       {tab === 'team' && (
         <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-2xs dark:border-white/10 dark:bg-[#0d1017]">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3 dark:border-white/10">
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              Керуйте правами модулів та відстежуйте статус push-сповіщень
+            </span>
+            <div className="flex items-center gap-2">
+              {pushTestMsg && (
+                <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400">
+                  {pushTestMsg}
+                </span>
+              )}
+              <button
+                type="button"
+                disabled={testingPush}
+                onClick={handleTestPush}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
+              >
+                {testingPush ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <BellRing className="h-3.5 w-3.5 text-indigo-500" />
+                )}
+                Тест Push-сповіщення
+              </button>
+            </div>
+          </div>
           <div className="divide-y divide-slate-100 dark:divide-white/10">
             {members.map((m) => {
               const memberIsAdmin = m.role === 'owner' || m.role === 'admin';

@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 import type { OrderStatus, Organization } from '@/types/crm';
 import {
   CalendarDays,
@@ -117,38 +116,20 @@ export default function ProductionClient({
     setErrorMsg(null);
     const now = new Date().toISOString();
 
-    const inWorkStage =
-      statuses.find((s) => !s.is_final && /робот|виробницт/i.test(s.name)) ||
-      null;
-
-    const patch: Record<string, unknown> = {
-      production_status: nextStatus,
-      updated_at: now,
-    };
-
-    if (nextStatus === 'in_progress') {
-      patch.production_accepted_by = currentUserId;
-      patch.production_accepted_at = now;
-      patch.production_completed_at = null;
-      if (inWorkStage) {
-        patch.status_id = inWorkStage.id;
-      }
-    } else if (nextStatus === 'done') {
-      patch.production_completed_at = now;
-    } else {
-      patch.production_completed_at = null;
-    }
-
-    const supabase = createClient();
-    const { error } = await supabase
-      .from('orders')
-      .update(patch)
-      .eq('id', orderId)
-      .eq('org_id', org.id);
+    const res = await fetch('/api/production/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orgId: org.id,
+        orderId,
+        productionStatus: nextStatus,
+      }),
+    });
+    const data = await res.json();
 
     setUpdatingId(null);
-    if (error) {
-      setErrorMsg(error.message || 'Не вдалося оновити статус виробництва');
+    if (!res.ok) {
+      setErrorMsg(data.error || 'Не вдалося оновити статус виробництва');
       return;
     }
 
@@ -157,10 +138,7 @@ export default function ProductionClient({
         o.id === orderId
           ? {
               ...o,
-              status_id:
-                nextStatus === 'in_progress' && inWorkStage
-                  ? inWorkStage.id
-                  : o.status_id,
+              status_id: data.statusId ?? o.status_id,
               production_status: nextStatus,
               production_accepted_by:
                 nextStatus === 'in_progress'

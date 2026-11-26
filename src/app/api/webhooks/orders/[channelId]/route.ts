@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { sendOrgPushNotification } from '@/lib/push';
 
 function parseAmount(val: unknown): number {
   if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
@@ -249,7 +250,7 @@ export async function POST(
 
     const { data: channel, error: chErr } = await admin
       .from('integration_channels')
-      .select('id, org_id, type, name, is_active, webhook_secret')
+      .select('id, org_id, type, name, is_active, webhook_secret, organization:organizations(slug)')
       .eq('id', channelId)
       .eq('is_active', true)
       .single();
@@ -260,6 +261,11 @@ export async function POST(
         { status: 404 }
       );
     }
+
+    const orgRel = Array.isArray(channel.organization)
+      ? channel.organization[0]
+      : channel.organization;
+    const orgSlug = (orgRel as { slug?: string } | null)?.slug || '';
 
     const apiKeyHeader = request.headers.get('x-api-key');
     if (
@@ -313,6 +319,19 @@ export async function POST(
             existingOrder.id,
             existingOrder.status_id
           );
+
+          if (amountAdded > 0) {
+            await sendOrgPushNotification({
+              orgId: channel.org_id,
+              targetPermission: 'cashflow',
+              eventType: 'order_paid',
+              title: `✅ Оплачено замовлення #${existingOrder.order_number}`,
+              body: `+${amountAdded.toFixed(0)} зараховано в Касу (${channel.name})`,
+              url: orgSlug
+                ? `/w/${orgSlug}/orders/${existingOrder.id}`
+                : '/',
+            });
+          }
 
           return NextResponse.json({
             ok: true,
@@ -532,6 +551,15 @@ export async function POST(
       });
       cashflowAdded = res.amountAdded;
     }
+
+    await sendOrgPushNotification({
+      orgId: channel.org_id,
+      targetPermission: 'orders',
+      eventType: 'order_created',
+      title: `🛍️ Нове замовлення #${order.order_number} (${channel.name})`,
+      body: `${contactPerson} • ${totalAmount.toFixed(0)}`,
+      url: orgSlug ? `/w/${orgSlug}/orders/${order.id}` : '/',
+    });
 
     return NextResponse.json({
       ok: true,

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getUserContext } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { sendOrgPushNotification } from '@/lib/push';
 
 export async function POST(request: Request) {
   const ctx = await getUserContext();
@@ -126,6 +127,27 @@ export async function POST(request: Request) {
         updated_at: new Date().toISOString(),
       })
       .eq('id', order.id);
+
+    // Notify Production if order moved into the 2nd stage ("Підтверджено")
+    const { data: orgStages } = await admin
+      .from('order_statuses')
+      .select('id, name')
+      .eq('org_id', orgId)
+      .order('position', { ascending: true })
+      .limit(2);
+
+    if (orgStages && orgStages.length >= 2 && orgStages[1].id === newStatusId) {
+      await sendOrgPushNotification({
+        orgId,
+        targetPermission: 'production',
+        eventType: 'production_new_task',
+        title: `🏭 Нова заявка #${order.order_number}`,
+        body: `Замовлення переведено в «${orgStages[1].name}»`,
+        url: membership?.organization?.slug
+          ? `/w/${membership.organization.slug}/production`
+          : '/',
+      });
+    }
 
     return NextResponse.json({
       ok: true,
