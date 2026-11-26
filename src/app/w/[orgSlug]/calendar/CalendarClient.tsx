@@ -88,11 +88,13 @@ export default function CalendarClient({
   });
   const [selectedDate, setSelectedDate] = useState<string>(todayKey);
   const [activeTab, setActiveTab] = useState<'day' | 'overdue' | 'unscheduled'>(
-    canManageOrders &&
-      initialScheduled.length === 0 &&
-      initialUnscheduled.length > 0
-      ? 'unscheduled'
-      : 'day'
+    () => {
+      const hasToday = initialScheduled.some((o) => o.deadline === todayKey);
+      if (canManageOrders && !hasToday && initialUnscheduled.length > 0) {
+        return 'unscheduled';
+      }
+      return 'day';
+    }
   );
   const [draggedOrderId, setDraggedOrderId] = useState<string | null>(null);
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);
