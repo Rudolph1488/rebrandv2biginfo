@@ -4,6 +4,7 @@ import { requireOrgAccess } from '@/lib/auth';
 import WorkspaceSidebar from '@/components/WorkspaceSidebar';
 import ThemeToggle from '@/components/ThemeToggle';
 import { NotificationPrompt } from '@/components/NotificationPrompt';
+import { InstallAppBanner } from '@/components/InstallAppBanner';
 import { Plus, Sparkles } from 'lucide-react';
 
 export default async function WorkspaceLayout({
@@ -61,6 +62,7 @@ export default async function WorkspaceLayout({
           </div>
         </header>
 
+        <InstallAppBanner />
         <NotificationPrompt orgId={org.id} />
 
         <main className="flex-1 p-4 pb-24 sm:p-6 sm:pb-24 lg:p-6 lg:pb-8">

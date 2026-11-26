@@ -25,11 +25,13 @@ create index if not exists idx_push_subs_org_active
 
 alter table public.push_subscriptions enable row level security;
 
+drop policy if exists "Users can manage own push subscriptions" on public.push_subscriptions;
 create policy "Users can manage own push subscriptions"
   on public.push_subscriptions for all
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
+drop policy if exists "Org admins can view org push subscriptions" on public.push_subscriptions;
 create policy "Org admins can view org push subscriptions"
   on public.push_subscriptions for select
   using (public.is_org_admin(org_id));
@@ -53,6 +55,7 @@ create index if not exists idx_notification_logs_org_created
 
 alter table public.notification_logs enable row level security;
 
+drop policy if exists "Users can view own notifications or admins view org notifications" on public.notification_logs;
 create policy "Users can view own notifications or admins view org notifications"
   on public.notification_logs for select
   using (user_id = auth.uid() or public.is_org_admin(org_id));
