@@ -698,6 +698,26 @@ export default function CalendarClient({
                       </div>
                     )}
 
+                    {o.deadline && (
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold ${
+                            o.production_status === 'done'
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+                              : o.production_status === 'in_progress'
+                                ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400'
+                                : 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'
+                          }`}
+                        >
+                          {o.production_status === 'done'
+                            ? 'Виробництво: Готово ✓'
+                            : o.production_status === 'in_progress'
+                              ? 'Виробництво: В роботі'
+                              : 'Виробництво: Очікує'}
+                        </span>
+                      </div>
+                    )}
+
                     {/* Status + Deadline Controls */}
                     <div className="flex flex-wrap items-center gap-2 pt-1">
                       <select

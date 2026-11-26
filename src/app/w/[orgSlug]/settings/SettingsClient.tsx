@@ -57,6 +57,8 @@ const COLOR_PRESETS = [
 
 const PERMISSION_LABELS: Array<{ key: keyof OrgPermissions; label: string }> = [
   { key: 'orders', label: 'Замовлення' },
+  { key: 'calendar', label: 'Календар' },
+  { key: 'production', label: 'Виробництво' },
   { key: 'clients', label: 'Клієнти' },
   { key: 'products', label: 'Номенклатура' },
   { key: 'warehouses', label: 'Склади' },
@@ -109,9 +111,9 @@ export default function SettingsClient({
   const [members, setMembers] = useState<MemberRow[]>(initialMembers);
   const [invites, setInvites] = useState<InviteRow[]>(initialInvites);
   const [invEmail, setInvEmail] = useState('');
-  const [invRole, setInvRole] = useState<'admin' | 'manager' | 'viewer'>(
-    'manager'
-  );
+  const [invRole, setInvRole] = useState<
+    'admin' | 'manager' | 'producer' | 'viewer'
+  >('manager');
   const [inviting, setInviting] = useState(false);
 
   // Integrations state
@@ -213,12 +215,31 @@ export default function SettingsClient({
     if (!invEmail.trim()) return;
     setInviting(true);
     const supabase = createClient();
+
+    const defaultInvitePermissions: Partial<OrgPermissions> | undefined =
+      invRole === 'producer'
+        ? {
+            orders: false,
+            calendar: true,
+            production: true,
+            clients: false,
+            products: false,
+            warehouses: false,
+            view_cost_price: false,
+            cashflow: false,
+            settings: false,
+          }
+        : undefined;
+
     const { data, error } = await supabase
       .from('organization_invites')
       .insert({
         org_id: org.id,
         email: invEmail.trim().toLowerCase(),
         role: invRole,
+        ...(defaultInvitePermissions
+          ? { permissions: defaultInvitePermissions }
+          : {}),
       })
       .select('id, email, role, token')
       .single();
@@ -626,11 +647,18 @@ export default function SettingsClient({
                 <select
                   value={invRole}
                   onChange={(e) =>
-                    setInvRole(e.target.value as 'admin' | 'manager' | 'viewer')
+                    setInvRole(
+                      e.target.value as
+                        | 'admin'
+                        | 'manager'
+                        | 'producer'
+                        | 'viewer'
+                    )
                   }
-                  className={`${inputCls} sm:w-40`}
+                  className={`${inputCls} sm:w-44`}
                 >
                   <option value="manager">Менеджер</option>
+                  <option value="producer">Виробник</option>
                   <option value="admin">Адмін</option>
                   <option value="viewer">Спостерігач</option>
                 </select>

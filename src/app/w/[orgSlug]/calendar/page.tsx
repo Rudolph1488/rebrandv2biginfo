@@ -10,9 +10,16 @@ export default async function CalendarPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const { org, isAdmin, permissions } = await requireOrgAccess(orgSlug);
+  const { membership, org, isAdmin, permissions } =
+    await requireOrgAccess(orgSlug);
 
-  if (!isAdmin && !permissions.orders) {
+  const canAccessCalendar =
+    isAdmin ||
+    Boolean(permissions.orders) ||
+    Boolean(permissions.calendar) ||
+    membership.role === 'producer';
+
+  if (!canAccessCalendar) {
     redirect(`/w/${org.slug}`);
   }
 
@@ -27,7 +34,7 @@ export default async function CalendarPage({
     supabase
       .from('orders')
       .select(
-        'id, org_id, order_number, status_id, client_id, warehouse_id, stock_deducted, source_name, total_amount, ttn, delivery_city, delivery_warehouse, notes, deadline, created_at, client:clients(id, contact_person, phone)'
+        'id, org_id, order_number, status_id, client_id, warehouse_id, stock_deducted, source_name, total_amount, ttn, delivery_city, delivery_warehouse, notes, deadline, production_status, created_at, client:clients(id, contact_person, phone)'
       )
       .eq('org_id', org.id)
       .not('deadline', 'is', null)

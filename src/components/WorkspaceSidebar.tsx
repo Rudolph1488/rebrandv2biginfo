@@ -25,6 +25,7 @@ import {
   Plus,
   BookOpen,
   CalendarDays,
+  Factory,
 } from 'lucide-react';
 
 interface Props {
@@ -67,7 +68,20 @@ export default function WorkspaceSidebar({
           label: 'Календар',
           href: `${base}/calendar`,
           icon: CalendarDays,
-          visible: isAdmin || permissions.orders,
+          visible:
+            isAdmin ||
+            permissions.orders ||
+            Boolean(permissions.calendar) ||
+            role === 'producer',
+        },
+        {
+          label: 'Виробництво',
+          href: `${base}/production`,
+          icon: Factory,
+          visible:
+            isAdmin ||
+            Boolean(permissions.production) ||
+            role === 'producer',
         },
         {
           label: 'Клієнти',

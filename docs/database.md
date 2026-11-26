@@ -12,6 +12,7 @@
 3. **[0003_supplies_and_order_warehouse.sql](../supabase/migrations/0003_supplies_and_order_warehouse.sql)** — документи постачання (`supply_documents`) та прив'язка складів до замовлень (`orders.warehouse_id`, `orders.stock_deducted`).
 4. **[0004_order_item_attributes.sql](../supabase/migrations/0004_order_item_attributes.sql)** — поле `attributes` (`jsonb`) в `order_items` для збереження розміру, кольору та інших опцій товару.
 5. **[0005_order_deadline.sql](../supabase/migrations/0005_order_deadline.sql)** — поле `deadline` (`date`) та індекс `idx_orders_org_deadline` в `orders` для планування відвантажень у Календарі.
+6. **[0006_production_and_producer_role.sql](../supabase/migrations/0006_production_and_producer_role.sql)** — роль `producer` («Виробник»), поля виробництва (`production_status`, `production_accepted_by`, `production_accepted_at`, `production_completed_at`) в `orders` та RLS-політики доступу до модулів `production` і `calendar`.
 
 ---
 

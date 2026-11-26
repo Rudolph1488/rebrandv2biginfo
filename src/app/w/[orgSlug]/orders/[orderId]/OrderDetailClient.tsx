@@ -928,12 +928,31 @@ export default function OrderDetailClient({
               })}
             </div>
 
-            <Link
-              href={`/w/${org.slug}/calendar`}
-              className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
-            >
-              Відкрити Календар →
-            </Link>
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <Link
+                href={`/w/${org.slug}/calendar`}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
+              >
+                Відкрити Календар →
+              </Link>
+              {deadline && (
+                <span
+                  className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${
+                    order.production_status === 'done'
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+                      : order.production_status === 'in_progress'
+                        ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400'
+                        : 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'
+                  }`}
+                >
+                  {order.production_status === 'done'
+                    ? 'Вироблено ✓'
+                    : order.production_status === 'in_progress'
+                      ? 'У виробництві'
+                      : 'Заявка на виробництво'}
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Client Card */}
