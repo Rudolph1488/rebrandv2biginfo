@@ -7,6 +7,7 @@ import type {
   OrderRecord,
   OrderStatus,
   PrintOptionRecord,
+  PrintZoneRecord,
   ProductCategoryRecord,
   ProductRecord,
 } from '@/types/crm';
@@ -88,7 +89,7 @@ export default async function OrdersPage({
     'unit',
   ].join(', ');
 
-  const [statusesRes, ordersRes, clientsRes, productsRes, warehousesRes, printOptsRes] =
+  const [statusesRes, ordersRes, clientsRes, productsRes, warehousesRes, printOptsRes, printZonesRes] =
     await Promise.all([
       supabase
         .from('order_statuses')
@@ -121,6 +122,14 @@ export default async function OrdersPage({
           canViewCost
             ? 'id, org_id, name, price, cost_price, is_active, position, created_at'
             : 'id, org_id, name, price, is_active, position, created_at'
+        )
+        .eq('org_id', org.id)
+        .eq('is_active', true)
+        .order('position', { ascending: true }),
+      supabase
+        .from('print_zones')
+        .select(
+          'id, org_id, name, default_width_cm, default_height_cm, position, is_active, created_at'
         )
         .eq('org_id', org.id)
         .eq('is_active', true)
@@ -164,6 +173,10 @@ export default async function OrdersPage({
       printOptions={
         (printOptsRes.data || []) as unknown as PrintOptionRecord[]
       }
+      printZones={
+        (printZonesRes.data || []) as unknown as PrintZoneRecord[]
+      }
+      enterpriseBrandingReady={!printZonesRes.error}
       warehouses={(warehousesRes.data || []) as Array<{ id: string; name: string; is_default: boolean }>}
       canViewCost={canViewCost}
       openNew={openNew === '1'}

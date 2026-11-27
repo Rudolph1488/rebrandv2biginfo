@@ -72,6 +72,7 @@ export interface ClientRecord {
 }
 
 export type BrandingMode = 'none' | 'apparel' | 'sublimation';
+export type BrandingMethod = 'none' | 'dtf' | 'embroidery' | 'sublimation';
 
 export interface ProductCategoryRecord {
   id: string;
@@ -79,6 +80,35 @@ export interface ProductCategoryRecord {
   name: string;
   branding_mode: BrandingMode;
   position: number;
+  created_at: string;
+}
+
+export interface PrintZoneRecord {
+  id: string;
+  org_id: string;
+  name: string;
+  default_width_cm: number;
+  default_height_cm: number;
+  position: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface OrderItemBrandingRecord {
+  id: string;
+  org_id: string;
+  order_item_id: string;
+  method: 'dtf' | 'embroidery' | 'sublimation';
+  print_zone_id: string | null;
+  print_option_id: string | null;
+  zone_name: string;
+  width_cm: number | null;
+  height_cm: number | null;
+  roll_meters: number | null;
+  film_cost_total: number;
+  press_cost_total: number;
+  unit_cost: number;
+  unit_price: number;
   created_at: string;
 }
 

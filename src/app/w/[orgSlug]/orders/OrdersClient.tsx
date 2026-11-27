@@ -6,12 +6,14 @@ import { createClient } from '@/lib/supabase/client';
 import { compressMockupToWebp } from '@/lib/compressImage';
 import { calculateDtfNesting } from '@/lib/dtfCalculator';
 import type {
+  BrandingMethod,
   BrandingMode,
   ClientRecord,
   OrderRecord,
   OrderStatus,
   Organization,
   PrintOptionRecord,
+  PrintZoneRecord,
   ProductCategoryRecord,
   ProductRecord,
 } from '@/types/crm';
@@ -32,18 +34,19 @@ import {
 } from 'lucide-react';
 
 interface DtfZoneItem {
+  printZoneId: string | null;
   zone: string;
   widthCm: number;
   heightCm: number;
 }
 
-const STANDARD_PRINT_ZONES = [
+const FALLBACK_PRINT_ZONES = [
   'Серце',
   'Груди',
-  'Спина',
+  'Спина А4',
+  'Спина А3',
   'Плече / Рукав',
   'Капюшон',
-  'Чашка',
 ];
 
 interface DraftItem {
@@ -58,6 +61,7 @@ interface DraftItem {
   apparelMethod: 'dtf' | 'embroidery';
   selectedOptionIds: string[];
   dtfZones: DtfZoneItem[];
+  draftZoneId: string;
   draftZone: string;
   draftW: number | '';
   draftH: number | '';
@@ -66,7 +70,7 @@ interface DraftItem {
   mockupUrl: string;
 }
 
-function emptyDraftItem(): DraftItem {
+function emptyDraftItem(firstZone?: PrintZoneRecord): DraftItem {
   return {
     productId: '',
     name: '',
@@ -79,9 +83,10 @@ function emptyDraftItem(): DraftItem {
     apparelMethod: 'dtf',
     selectedOptionIds: [],
     dtfZones: [],
-    draftZone: 'Серце',
-    draftW: 10,
-    draftH: 10,
+    draftZoneId: firstZone?.id || '',
+    draftZone: firstZone?.name || 'Серце',
+    draftW: firstZone ? Number(firstZone.default_width_cm) : 10,
+    draftH: firstZone ? Number(firstZone.default_height_cm) : 10,
     color: '',
     size: '',
     mockupUrl: '',
@@ -101,6 +106,8 @@ export default function OrdersClient({
   products,
   productCategories = [],
   printOptions = [],
+  printZones = [],
+  enterpriseBrandingReady = false,
   warehouses,
   canViewCost,
   openNew = false,
@@ -118,6 +125,8 @@ export default function OrdersClient({
   products: ProductRecord[];
   productCategories?: ProductCategoryRecord[];
   printOptions?: PrintOptionRecord[];
+  printZones?: PrintZoneRecord[];
+  enterpriseBrandingReady?: boolean;
   warehouses: Array<{ id: string; name: string; is_default: boolean }>;
   canViewCost: boolean;
   openNew?: boolean;
@@ -236,7 +245,9 @@ export default function OrdersClient({
   );
   const [ttn, setTtn] = useState('');
   const [notes, setNotes] = useState('');
-  const [items, setItems] = useState<DraftItem[]>([emptyDraftItem()]);
+  const [items, setItems] = useState<DraftItem[]>([
+    emptyDraftItem(printZones[0]),
+  ]);
   const [uploadingMockupIdx, setUploadingMockupIdx] = useState<number | null>(
     null
   );
@@ -316,7 +327,7 @@ export default function OrdersClient({
       if (data) setProductSearchResults(data as unknown as ProductRecord[]);
     }, 180);
     return () => clearTimeout(timer);
-  }, [activeItemIdx, activeItemQuery, org.id, canViewCost, productCategories.length]);
+  }, [activeItemIdx, activeItemQuery, org.id, canViewCost]);
 
   function handleSelectClientObj(found: ClientRecord) {
     setClientId(found.id);
@@ -405,24 +416,20 @@ export default function OrdersClient({
   }
 
   function resolveBrandingMode(prod: ProductRecord): BrandingMode {
-    if (prod.category_id) {
-      const cat = productCategories.find((c) => c.id === prod.category_id);
-      if (cat) return cat.branding_mode;
-    }
-    if (prod.category) {
-      const cat = productCategories.find(
-        (c) => c.name.toLowerCase() === prod.category!.toLowerCase()
-      );
-      if (cat) return cat.branding_mode;
-    }
-    return 'none';
+    if (!prod.category_id) return 'none';
+    const cat = productCategories.find((c) => c.id === prod.category_id);
+    return cat ? cat.branding_mode : 'none';
   }
 
   function handleAddDtfZone(idx: number) {
     const next = [...items];
     const curr = next[idx];
+    const matchedZone = curr.draftZoneId
+      ? printZones.find((z) => z.id === curr.draftZoneId)
+      : printZones[0];
     const zone: DtfZoneItem = {
-      zone: curr.draftZone || 'Серце',
+      printZoneId: matchedZone?.id || null,
+      zone: matchedZone?.name || curr.draftZone || 'Серце',
       widthCm: Math.max(1, Number(curr.draftW) || 10),
       heightCm: Math.max(1, Number(curr.draftH) || 10),
     };
@@ -560,46 +567,130 @@ export default function OrdersClient({
     if (!error && createdOrder) {
       const validItems = items.filter((i) => i.name.trim());
       if (validItems.length > 0) {
-        await supabase.from('order_items').insert(
-          validItems.map((i) => {
-            const attrs: Record<string, string> = {};
-            if (i.color.trim()) attrs['Колір'] = i.color.trim();
-            if (i.size.trim()) attrs['Розмір'] = i.size.trim();
+        const { data: insertedItems } = await supabase
+          .from('order_items')
+          .insert(
+            validItems.map((i) => {
+              const attrs: Record<string, string> = {};
+              if (i.color.trim()) attrs['Колір'] = i.color.trim();
+              if (i.size.trim()) attrs['Розмір'] = i.size.trim();
+              const method: BrandingMethod =
+                i.brandingMode === 'apparel'
+                  ? i.apparelMethod
+                  : i.brandingMode === 'sublimation'
+                    ? 'sublimation'
+                    : 'none';
+              if (method === 'dtf') attrs['Спосіб'] = 'DTF-друк';
+              else if (method === 'embroidery') attrs['Спосіб'] = 'Вишивка';
+              else if (method === 'sublimation') attrs['Спосіб'] = 'Сублімація';
+
+              const chosenNames =
+                i.brandingMode === 'apparel'
+                  ? printOptions
+                      .filter((o) => i.selectedOptionIds.includes(o.id))
+                      .map((o) => o.name)
+                  : [];
+              const dtfNames =
+                method === 'dtf'
+                  ? i.dtfZones.map(
+                      (z) => `${z.zone} (${z.widthCm}×${z.heightCm} см)`
+                    )
+                  : [];
+              const allPrint = [...dtfNames, ...chosenNames];
+              if (allPrint.length > 0) {
+                attrs['Нанесення'] = allPrint.join(', ');
+              }
+              if (i.mockupUrl.trim()) attrs['Макет'] = i.mockupUrl.trim();
+
+              return {
+                org_id: org.id,
+                order_id: createdOrder.id,
+                product_id: i.productId || null,
+                name: i.name.trim(),
+                qty: Number(i.qty) || 1,
+                unit_price: Number(i.unitPrice) || 0,
+                unit_cost: Number(i.unitCost) || 0,
+                attributes: attrs,
+                ...(enterpriseBrandingReady
+                  ? {
+                      branding_method: method,
+                      mockup_url: i.mockupUrl.trim() || null,
+                    }
+                  : {}),
+              };
+            })
+          )
+          .select('id');
+
+        if (enterpriseBrandingReady && insertedItems && insertedItems.length > 0) {
+          const brandingRows: Array<Record<string, unknown>> = [];
+          validItems.forEach((i, itemIdx) => {
+            const orderItemId = insertedItems[itemIdx]?.id;
+            if (!orderItemId) return;
+            const qty = Math.max(1, Number(i.qty) || 1);
+
+            if (i.brandingMode === 'apparel' && i.apparelMethod === 'dtf') {
+              for (const z of i.dtfZones) {
+                const calc = calculateDtfNesting({
+                  widthCm: z.widthCm,
+                  heightCm: z.heightCm,
+                  qty,
+                  settings: org.dtf_settings,
+                });
+                brandingRows.push({
+                  org_id: org.id,
+                  order_item_id: orderItemId,
+                  method: 'dtf',
+                  print_zone_id: z.printZoneId,
+                  print_option_id: null,
+                  zone_name: z.zone,
+                  width_cm: z.widthCm,
+                  height_cm: z.heightCm,
+                  roll_meters: calc.meters,
+                  film_cost_total: calc.filmCostTotal,
+                  press_cost_total: Number((calc.pressCostPerUnit * qty).toFixed(2)),
+                  unit_cost: calc.costPerUnit,
+                  unit_price: calc.recommendedPricePerUnit,
+                });
+              }
+            }
+
             if (i.brandingMode === 'apparel') {
-              attrs['Спосіб'] =
-                i.apparelMethod === 'dtf' ? 'DTF-друк' : 'Вишивка';
-            } else if (i.brandingMode === 'sublimation') {
-              attrs['Спосіб'] = 'Сублімація';
+              for (const optId of i.selectedOptionIds) {
+                const opt = printOptions.find((o) => o.id === optId);
+                if (!opt) continue;
+                brandingRows.push({
+                  org_id: org.id,
+                  order_item_id: orderItemId,
+                  method:
+                    i.apparelMethod === 'embroidery' ? 'embroidery' : 'dtf',
+                  print_zone_id: null,
+                  print_option_id: opt.id,
+                  zone_name: opt.name,
+                  unit_cost: Number(opt.cost_price) || 0,
+                  unit_price: Number(opt.price) || 0,
+                });
+              }
             }
-            const chosenNames =
-              i.brandingMode === 'apparel'
-                ? printOptions
-                    .filter((o) => i.selectedOptionIds.includes(o.id))
-                    .map((o) => o.name)
-                : [];
-            const dtfNames =
-              i.brandingMode === 'apparel' && i.apparelMethod === 'dtf'
-                ? i.dtfZones.map(
-                    (z) => `${z.zone} (${z.widthCm}×${z.heightCm} см)`
-                  )
-                : [];
-            const allPrint = [...dtfNames, ...chosenNames];
-            if (allPrint.length > 0) {
-              attrs['Нанесення'] = allPrint.join(', ');
+
+            if (i.brandingMode === 'sublimation') {
+              brandingRows.push({
+                org_id: org.id,
+                order_item_id: orderItemId,
+                method: 'sublimation',
+                print_zone_id: null,
+                print_option_id: null,
+                zone_name: 'Сублімація (макет)',
+                unit_cost: i.baseCost,
+                unit_price: i.basePrice,
+              });
             }
-            if (i.mockupUrl.trim()) attrs['Макет'] = i.mockupUrl.trim();
-            return {
-              org_id: org.id,
-              order_id: createdOrder.id,
-              product_id: i.productId || null,
-              name: i.name.trim(),
-              qty: Number(i.qty) || 1,
-              unit_price: Number(i.unitPrice) || 0,
-              unit_cost: Number(i.unitCost) || 0,
-              attributes: attrs,
-            };
-          })
-        );
+          });
+
+          if (brandingRows.length > 0) {
+            await supabase.from('order_item_brandings').insert(brandingRows);
+          }
+        }
       }
 
       // Check auto-deduct if initial status matches warehouse rule
@@ -635,7 +726,7 @@ export default function OrdersClient({
       setClientId('');
       setTtn('');
       setNotes('');
-      setItems([emptyDraftItem()]);
+      setItems([emptyDraftItem(printZones[0])]);
       router.refresh();
     }
 
@@ -837,14 +928,14 @@ export default function OrdersClient({
                     {ord.order_items.slice(0, 3).map((item) => {
                       const attrText = item.attributes
                         ? Object.entries(item.attributes)
-                            .filter(
-                              ([k, v]) =>
-                                k !== 'Артикул' &&
-                                k !== 'Макет' &&
-                                String(v).trim() !== ''
-                            )
-                            .map(([k, v]) => `${k}: ${v}`)
-                            .join(' • ')
+                          .filter(
+                            ([k, v]) =>
+                              k !== 'Артикул' &&
+                              k !== 'Макет' &&
+                              String(v).trim() !== ''
+                          )
+                          .map(([k, v]) => `${k}: ${v}`)
+                          .join(' • ')
                         : '';
                       return (
                         <div key={item.id} className="leading-snug">
@@ -885,13 +976,12 @@ export default function OrdersClient({
                       {ord.deadline.split('-').reverse().join('.')}
                     </span>
                     <span
-                      className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${
-                        ord.production_status === 'done'
-                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
-                          : ord.production_status === 'in_progress'
-                            ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400'
-                            : 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'
-                      }`}
+                      className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${ord.production_status === 'done'
+                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+                        : ord.production_status === 'in_progress'
+                          ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400'
+                          : 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'
+                        }`}
                     >
                       {ord.production_status === 'done'
                         ? 'Вироблено ✓'
@@ -926,17 +1016,16 @@ export default function OrdersClient({
       <div className="hidden md:block">
         {viewMode === 'kanban' ? (
           <div
-            className={`grid grid-cols-2 gap-3 lg:grid-cols-3 ${
-              statuses.length >= 6 ? 'xl:grid-cols-6' : 'xl:grid-cols-5'
-            }`}
+            className={`grid grid-cols-2 gap-3 lg:grid-cols-3 ${statuses.length >= 6 ? 'xl:grid-cols-6' : 'xl:grid-cols-5'
+              }`}
           >
             {statuses.map((st, stIdx) => {
               const validStatusIds = new Set(statuses.map((s) => s.id));
               const colOrders = orders.filter((o) =>
                 stIdx === 0
                   ? o.status_id === st.id ||
-                    !o.status_id ||
-                    !validStatusIds.has(o.status_id)
+                  !o.status_id ||
+                  !validStatusIds.has(o.status_id)
                   : o.status_id === st.id
               );
               const visibleOrders = st.is_final
@@ -1011,14 +1100,14 @@ export default function OrdersClient({
                             {ord.order_items.slice(0, 2).map((item) => {
                               const attrText = item.attributes
                                 ? Object.entries(item.attributes)
-                                    .filter(
-                                      ([k, v]) =>
-                                        k !== 'Артикул' &&
-                                        k !== 'Макет' &&
-                                        String(v).trim() !== ''
-                                    )
-                                    .map(([k, v]) => `${k}: ${v}`)
-                                    .join(' • ')
+                                  .filter(
+                                    ([k, v]) =>
+                                      k !== 'Артикул' &&
+                                      k !== 'Макет' &&
+                                      String(v).trim() !== ''
+                                  )
+                                  .map(([k, v]) => `${k}: ${v}`)
+                                  .join(' • ')
                                 : '';
                               return (
                                 <div key={item.id} className="leading-tight">
@@ -1070,13 +1159,12 @@ export default function OrdersClient({
                                 {ord.deadline.split('-').reverse().join('.')}
                               </span>
                               <span
-                                className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
-                                  ord.production_status === 'done'
-                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
-                                    : ord.production_status === 'in_progress'
-                                      ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400'
-                                      : 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'
-                                }`}
+                                className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${ord.production_status === 'done'
+                                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+                                  : ord.production_status === 'in_progress'
+                                    ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400'
+                                    : 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'
+                                  }`}
                               >
                                 {ord.production_status === 'done'
                                   ? 'Вироблено ✓'
@@ -1433,7 +1521,9 @@ export default function OrdersClient({
                   </span>
                   <button
                     type="button"
-                    onClick={() => setItems([...items, emptyDraftItem()])}
+                    onClick={() =>
+                      setItems([...items, emptyDraftItem(printZones[0])])
+                    }
                     className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
                   >
                     <Plus className="h-3.5 w-3.5" /> Додати позицію
@@ -1517,13 +1607,13 @@ export default function OrdersClient({
                             const nextQty = Math.max(1, Number(raw) || 1);
                             next[idx] =
                               item.dtfZones.length > 0 ||
-                              item.selectedOptionIds.length > 0
+                                item.selectedOptionIds.length > 0
                                 ? recalcItemWithOptions(
-                                    item,
-                                    item.selectedOptionIds,
-                                    item.dtfZones,
-                                    nextQty
-                                  )
+                                  item,
+                                  item.selectedOptionIds,
+                                  item.dtfZones,
+                                  nextQty
+                                )
                                 : { ...item, qty: nextQty };
                           }
                           setItems(next);
@@ -1583,11 +1673,10 @@ export default function OrdersClient({
                                 onClick={() =>
                                   handleApparelMethodChange(idx, 'dtf')
                                 }
-                                className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
-                                  item.apparelMethod === 'dtf'
-                                    ? 'bg-indigo-600 text-white shadow-2xs'
-                                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
-                                }`}
+                                className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${item.apparelMethod === 'dtf'
+                                  ? 'bg-indigo-600 text-white shadow-2xs'
+                                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                                  }`}
                               >
                                 DTF-друк (рулон)
                               </button>
@@ -1596,11 +1685,10 @@ export default function OrdersClient({
                                 onClick={() =>
                                   handleApparelMethodChange(idx, 'embroidery')
                                 }
-                                className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
-                                  item.apparelMethod === 'embroidery'
-                                    ? 'bg-indigo-600 text-white shadow-2xs'
-                                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
-                                }`}
+                                className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${item.apparelMethod === 'embroidery'
+                                  ? 'bg-indigo-600 text-white shadow-2xs'
+                                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                                  }`}
                               >
                                 Вишивка
                               </button>
@@ -1648,24 +1736,55 @@ export default function OrdersClient({
                         {item.brandingMode === 'apparel' &&
                           item.apparelMethod === 'dtf' && (
                             <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-indigo-200/70 bg-indigo-50/40 p-2 dark:border-indigo-500/20 dark:bg-indigo-500/5">
-                              <select
-                                value={item.draftZone}
-                                onChange={(e) => {
-                                  const next = [...items];
-                                  next[idx] = {
-                                    ...item,
-                                    draftZone: e.target.value,
-                                  };
-                                  setItems(next);
-                                }}
-                                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium dark:border-white/10 dark:bg-[#131722] dark:text-white"
-                              >
-                                {STANDARD_PRINT_ZONES.map((z) => (
-                                  <option key={z} value={z}>
-                                    {z}
-                                  </option>
-                                ))}
-                              </select>
+                              {printZones.length > 0 ? (
+                                <select
+                                  value={item.draftZoneId || printZones[0].id}
+                                  onChange={(e) => {
+                                    const chosen = printZones.find(
+                                      (z) => z.id === e.target.value
+                                    );
+                                    const next = [...items];
+                                    next[idx] = {
+                                      ...item,
+                                      draftZoneId: chosen?.id || '',
+                                      draftZone: chosen?.name || item.draftZone,
+                                      draftW: chosen
+                                        ? Number(chosen.default_width_cm)
+                                        : item.draftW,
+                                      draftH: chosen
+                                        ? Number(chosen.default_height_cm)
+                                        : item.draftH,
+                                    };
+                                    setItems(next);
+                                  }}
+                                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium dark:border-white/10 dark:bg-[#131722] dark:text-white"
+                                >
+                                  {printZones.map((z) => (
+                                    <option key={z.id} value={z.id}>
+                                      {z.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <select
+                                  value={item.draftZone}
+                                  onChange={(e) => {
+                                    const next = [...items];
+                                    next[idx] = {
+                                      ...item,
+                                      draftZone: e.target.value,
+                                    };
+                                    setItems(next);
+                                  }}
+                                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium dark:border-white/10 dark:bg-[#131722] dark:text-white"
+                                >
+                                  {FALLBACK_PRINT_ZONES.map((z) => (
+                                    <option key={z} value={z}>
+                                      {z}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
                               <div className="flex items-center gap-1 text-[11px] text-slate-500">
                                 <input
                                   type="number"
@@ -1772,11 +1891,10 @@ export default function OrdersClient({
                                     onClick={() =>
                                       togglePrintOption(idx, opt.id)
                                     }
-                                    className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${
-                                      active
-                                        ? 'border-indigo-600 bg-indigo-600 text-white'
-                                        : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 dark:border-white/10 dark:bg-white/5 dark:text-slate-300'
-                                    }`}
+                                    className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${active
+                                      ? 'border-indigo-600 bg-indigo-600 text-white'
+                                      : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 dark:border-white/10 dark:bg-white/5 dark:text-slate-300'
+                                      }`}
                                   >
                                     {opt.name} (+{Number(opt.price).toFixed(0)}
                                     {currencySymbol})
@@ -1821,210 +1939,209 @@ export default function OrdersClient({
                           (item.dtfZones.length > 0 ||
                             item.selectedOptionIds.length > 0 ||
                             item.unitCost > 0) && (() => {
-                            const qty = Number(item.qty) || 1;
-                            const unitPrice = Number(item.unitPrice) || 0;
-                            const itemRevenue = unitPrice * qty;
-                            const itemCostTotal = item.unitCost * qty;
-                            const itemMargin = itemRevenue - itemCostTotal;
-                            const itemMarginPct =
-                              itemRevenue > 0
-                                ? Math.round((itemMargin / itemRevenue) * 100)
-                                : 0;
-                            const chosenOpts =
-                              item.brandingMode === 'apparel'
-                                ? printOptions.filter((o) =>
+                              const qty = Number(item.qty) || 1;
+                              const unitPrice = Number(item.unitPrice) || 0;
+                              const itemRevenue = unitPrice * qty;
+                              const itemCostTotal = item.unitCost * qty;
+                              const itemMargin = itemRevenue - itemCostTotal;
+                              const itemMarginPct =
+                                itemRevenue > 0
+                                  ? Math.round((itemMargin / itemRevenue) * 100)
+                                  : 0;
+                              const chosenOpts =
+                                item.brandingMode === 'apparel'
+                                  ? printOptions.filter((o) =>
                                     item.selectedOptionIds.includes(o.id)
                                   )
-                                : [];
-                            const baseMargin =
-                              (item.basePrice - item.baseCost) * qty;
+                                  : [];
+                              const baseMargin =
+                                (item.basePrice - item.baseCost) * qty;
 
-                            return (
-                              <div className="space-y-1.5 rounded-xl border border-slate-200/80 bg-slate-50/90 p-2.5 text-[11px] dark:border-white/10 dark:bg-white/[0.03]">
-                                <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                                  <span>Деталізація (×{qty} шт)</span>
-                                  <span>Собівартість / Продаж / Маржа</span>
-                                </div>
-
-                                {(item.baseCost > 0 || item.basePrice > 0) && (
-                                  <div className="flex flex-wrap items-center justify-between gap-2 text-slate-600 dark:text-slate-300">
-                                    <span className="truncate font-medium">
-                                      Заготовка: {item.name || 'Товар'}
-                                    </span>
-                                    <div className="flex items-center gap-2 font-mono">
-                                      <span>
-                                        собів. {(item.baseCost * qty).toFixed(0)}
-                                        {currencySymbol}
-                                        {qty > 1
-                                          ? ` (${item.baseCost.toFixed(0)}/шт)`
-                                          : ''}
-                                      </span>
-                                      <span className="text-slate-300 dark:text-slate-600">
-                                        •
-                                      </span>
-                                      <span>
-                                        прод. {(item.basePrice * qty).toFixed(0)}
-                                        {currencySymbol}
-                                      </span>
-                                      <span className="text-slate-300 dark:text-slate-600">
-                                        •
-                                      </span>
-                                      <span
-                                        className={
-                                          baseMargin >= 0
-                                            ? 'font-semibold text-emerald-600 dark:text-emerald-400'
-                                            : 'font-semibold text-red-600 dark:text-red-400'
-                                        }
-                                      >
-                                        {baseMargin >= 0 ? '+' : ''}
-                                        {baseMargin.toFixed(0)}
-                                        {currencySymbol}
-                                      </span>
-                                    </div>
+                              return (
+                                <div className="space-y-1.5 rounded-xl border border-slate-200/80 bg-slate-50/90 p-2.5 text-[11px] dark:border-white/10 dark:bg-white/[0.03]">
+                                  <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                    <span>Деталізація (×{qty} шт)</span>
+                                    <span>Собівартість / Продаж / Маржа</span>
                                   </div>
-                                )}
 
-                                {item.brandingMode === 'apparel' &&
-                                  item.apparelMethod === 'dtf' &&
-                                  item.dtfZones.map((z, zIdx) => {
-                                  const calc = calculateDtfNesting({
-                                    widthCm: z.widthCm,
-                                    heightCm: z.heightCm,
-                                    qty,
-                                    settings: org.dtf_settings,
-                                  });
-                                  const zoneCostTotal = calc.costPerUnit * qty;
-                                  const pressCostTotal =
-                                    calc.pressCostPerUnit * qty;
-                                  const zoneRecTotal =
-                                    calc.recommendedPricePerUnit * qty;
-                                  const zoneMargin =
-                                    zoneRecTotal - zoneCostTotal;
-                                  return (
-                                    <div
-                                      key={zIdx}
-                                      className="flex flex-wrap items-center justify-between gap-2 text-slate-600 dark:text-slate-300"
-                                    >
-                                      <span className="truncate">
-                                        <span className="font-medium text-indigo-700 dark:text-indigo-300">
-                                          DTF {z.zone}
-                                        </span>{' '}
-                                        <span className="text-slate-400">
-                                          ({z.widthCm}×{z.heightCm}см •{' '}
-                                          {calc.perRow}/ряд • {calc.meters}м)
-                                        </span>
+                                  {(item.baseCost > 0 || item.basePrice > 0) && (
+                                    <div className="flex flex-wrap items-center justify-between gap-2 text-slate-600 dark:text-slate-300">
+                                      <span className="truncate font-medium">
+                                        Заготовка: {item.name || 'Товар'}
                                       </span>
-                                      <div className="flex flex-wrap items-center gap-1.5 font-mono">
+                                      <div className="flex items-center gap-2 font-mono">
                                         <span>
-                                          {pressCostTotal > 0 ? (
-                                            <>
-                                              плівка {calc.filmCostTotal.toFixed(1)}
-                                              {currencySymbol} + прес{' '}
-                                              {pressCostTotal.toFixed(0)}
-                                              {currencySymbol} ={' '}
-                                              <strong>
-                                                {zoneCostTotal.toFixed(1)}
-                                                {currencySymbol}
-                                              </strong>
-                                            </>
-                                          ) : (
-                                            <>
-                                              плівка{' '}
-                                              <strong>
-                                                {calc.filmCostTotal.toFixed(1)}
-                                                {currencySymbol}
-                                              </strong>
-                                            </>
-                                          )}
+                                          собів. {(item.baseCost * qty).toFixed(0)}
+                                          {currencySymbol}
                                           {qty > 1
-                                            ? ` (${calc.costPerUnit.toFixed(1)}/шт)`
+                                            ? ` (${item.baseCost.toFixed(0)}/шт)`
                                             : ''}
                                         </span>
                                         <span className="text-slate-300 dark:text-slate-600">
                                           •
                                         </span>
                                         <span>
-                                          рек. {zoneRecTotal.toFixed(0)}
+                                          прод. {(item.basePrice * qty).toFixed(0)}
                                           {currencySymbol}
                                         </span>
                                         <span className="text-slate-300 dark:text-slate-600">
                                           •
                                         </span>
-                                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                                          +{zoneMargin.toFixed(0)}
+                                        <span
+                                          className={
+                                            baseMargin >= 0
+                                              ? 'font-semibold text-emerald-600 dark:text-emerald-400'
+                                              : 'font-semibold text-red-600 dark:text-red-400'
+                                          }
+                                        >
+                                          {baseMargin >= 0 ? '+' : ''}
+                                          {baseMargin.toFixed(0)}
                                           {currencySymbol}
                                         </span>
                                       </div>
                                     </div>
-                                  );
-                                })}
+                                  )}
 
-                                {chosenOpts.map((opt) => {
-                                  const optCostTotal =
-                                    (Number(opt.cost_price) || 0) * qty;
-                                  const optPriceTotal =
-                                    (Number(opt.price) || 0) * qty;
-                                  const optMargin = optPriceTotal - optCostTotal;
-                                  return (
-                                    <div
-                                      key={opt.id}
-                                      className="flex flex-wrap items-center justify-between gap-2 text-slate-600 dark:text-slate-300"
-                                    >
-                                      <span className="truncate font-medium">
-                                        Опція: {opt.name}
+                                  {item.brandingMode === 'apparel' &&
+                                    item.apparelMethod === 'dtf' &&
+                                    item.dtfZones.map((z, zIdx) => {
+                                      const calc = calculateDtfNesting({
+                                        widthCm: z.widthCm,
+                                        heightCm: z.heightCm,
+                                        qty,
+                                        settings: org.dtf_settings,
+                                      });
+                                      const zoneCostTotal = calc.costPerUnit * qty;
+                                      const pressCostTotal =
+                                        calc.pressCostPerUnit * qty;
+                                      const zoneRecTotal =
+                                        calc.recommendedPricePerUnit * qty;
+                                      const zoneMargin =
+                                        zoneRecTotal - zoneCostTotal;
+                                      return (
+                                        <div
+                                          key={zIdx}
+                                          className="flex flex-wrap items-center justify-between gap-2 text-slate-600 dark:text-slate-300"
+                                        >
+                                          <span className="truncate">
+                                            <span className="font-medium text-indigo-700 dark:text-indigo-300">
+                                              DTF {z.zone}
+                                            </span>{' '}
+                                            <span className="text-slate-400">
+                                              ({z.widthCm}×{z.heightCm}см •{' '}
+                                              {calc.perRow}/ряд • {calc.meters}м)
+                                            </span>
+                                          </span>
+                                          <div className="flex flex-wrap items-center gap-1.5 font-mono">
+                                            <span>
+                                              {pressCostTotal > 0 ? (
+                                                <>
+                                                  плівка {calc.filmCostTotal.toFixed(1)}
+                                                  {currencySymbol} + прес{' '}
+                                                  {pressCostTotal.toFixed(0)}
+                                                  {currencySymbol} ={' '}
+                                                  <strong>
+                                                    {zoneCostTotal.toFixed(1)}
+                                                    {currencySymbol}
+                                                  </strong>
+                                                </>
+                                              ) : (
+                                                <>
+                                                  плівка{' '}
+                                                  <strong>
+                                                    {calc.filmCostTotal.toFixed(1)}
+                                                    {currencySymbol}
+                                                  </strong>
+                                                </>
+                                              )}
+                                              {qty > 1
+                                                ? ` (${calc.costPerUnit.toFixed(1)}/шт)`
+                                                : ''}
+                                            </span>
+                                            <span className="text-slate-300 dark:text-slate-600">
+                                              •
+                                            </span>
+                                            <span>
+                                              рек. {zoneRecTotal.toFixed(0)}
+                                              {currencySymbol}
+                                            </span>
+                                            <span className="text-slate-300 dark:text-slate-600">
+                                              •
+                                            </span>
+                                            <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                              +{zoneMargin.toFixed(0)}
+                                              {currencySymbol}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+
+                                  {chosenOpts.map((opt) => {
+                                    const optCostTotal =
+                                      (Number(opt.cost_price) || 0) * qty;
+                                    const optPriceTotal =
+                                      (Number(opt.price) || 0) * qty;
+                                    const optMargin = optPriceTotal - optCostTotal;
+                                    return (
+                                      <div
+                                        key={opt.id}
+                                        className="flex flex-wrap items-center justify-between gap-2 text-slate-600 dark:text-slate-300"
+                                      >
+                                        <span className="truncate font-medium">
+                                          Опція: {opt.name}
+                                        </span>
+                                        <div className="flex items-center gap-2 font-mono">
+                                          <span>
+                                            собів. {optCostTotal.toFixed(0)}
+                                            {currencySymbol}
+                                          </span>
+                                          <span className="text-slate-300 dark:text-slate-600">
+                                            •
+                                          </span>
+                                          <span>
+                                            прод. {optPriceTotal.toFixed(0)}
+                                            {currencySymbol}
+                                          </span>
+                                          <span className="text-slate-300 dark:text-slate-600">
+                                            •
+                                          </span>
+                                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                            +{optMargin.toFixed(0)}
+                                            {currencySymbol}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+
+                                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-1.5 dark:border-white/10">
+                                    <span className="font-semibold text-slate-700 dark:text-slate-200">
+                                      Підсумок позиції: собів.{' '}
+                                      <span className="font-mono">
+                                        {item.unitCost.toFixed(2)} {currencySymbol}/шт
                                       </span>
-                                      <div className="flex items-center gap-2 font-mono">
-                                        <span>
-                                          собів. {optCostTotal.toFixed(0)}
-                                          {currencySymbol}
+                                      {qty > 1 && (
+                                        <span className="ml-1 font-normal text-slate-500">
+                                          (разом {itemCostTotal.toFixed(0)}{' '}
+                                          {currencySymbol})
                                         </span>
-                                        <span className="text-slate-300 dark:text-slate-600">
-                                          •
-                                        </span>
-                                        <span>
-                                          прод. {optPriceTotal.toFixed(0)}
-                                          {currencySymbol}
-                                        </span>
-                                        <span className="text-slate-300 dark:text-slate-600">
-                                          •
-                                        </span>
-                                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                                          +{optMargin.toFixed(0)}
-                                          {currencySymbol}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-
-                                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-1.5 dark:border-white/10">
-                                  <span className="font-semibold text-slate-700 dark:text-slate-200">
-                                    Підсумок позиції: собів.{' '}
-                                    <span className="font-mono">
-                                      {item.unitCost.toFixed(2)} {currencySymbol}/шт
+                                      )}
                                     </span>
-                                    {qty > 1 && (
-                                      <span className="ml-1 font-normal text-slate-500">
-                                        (разом {itemCostTotal.toFixed(0)}{' '}
-                                        {currencySymbol})
-                                      </span>
-                                    )}
-                                  </span>
-                                  <span
-                                    className={`font-semibold ${
-                                      itemMargin >= 0
+                                    <span
+                                      className={`font-semibold ${itemMargin >= 0
                                         ? 'text-emerald-700 dark:text-emerald-400'
                                         : 'text-red-600 dark:text-red-400'
-                                    }`}
-                                  >
-                                    Маржа: {itemMargin >= 0 ? '+' : ''}
-                                    {itemMargin.toFixed(0)} {currencySymbol} (
-                                    {itemMarginPct}%)
-                                  </span>
+                                        }`}
+                                    >
+                                      Маржа: {itemMargin >= 0 ? '+' : ''}
+                                      {itemMargin.toFixed(0)} {currencySymbol} (
+                                      {itemMarginPct}%)
+                                    </span>
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })()}
+                              );
+                            })()}
                       </div>
                     </div>
                   ))}
@@ -2048,11 +2165,10 @@ export default function OrdersClient({
                         )}
                       </span>
                       <span
-                        className={`font-semibold ${
-                          totalMargin >= 0
-                            ? 'text-emerald-700 dark:text-emerald-400'
-                            : 'text-red-600 dark:text-red-400'
-                        }`}
+                        className={`font-semibold ${totalMargin >= 0
+                          ? 'text-emerald-700 dark:text-emerald-400'
+                          : 'text-red-600 dark:text-red-400'
+                          }`}
                       >
                         Маржа: {totalMargin >= 0 ? '+' : ''}
                         {totalMargin.toFixed(2)} {currencySymbol} (

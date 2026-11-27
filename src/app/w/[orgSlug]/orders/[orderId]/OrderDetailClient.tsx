@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type {
   CashflowRecord,
+  OrderItemBrandingRecord,
   OrderRecord,
   OrderStatus,
   Organization,
@@ -41,6 +42,7 @@ export default function OrderDetailClient({
   org,
   initialOrder,
   initialItems,
+  initialBrandings = [],
   statuses,
   products,
   warehouses,
@@ -52,6 +54,7 @@ export default function OrderDetailClient({
   org: Organization;
   initialOrder: OrderRecord;
   initialItems: ItemDraft[];
+  initialBrandings?: OrderItemBrandingRecord[];
   statuses: OrderStatus[];
   products: ProductRecord[];
   warehouses: Array<{ id: string; name: string; is_default: boolean }>;
@@ -487,6 +490,36 @@ export default function OrderDetailClient({
                             ))}
                           </div>
                         )}
+                      {(() => {
+                        const itemBrandings = item.id
+                          ? initialBrandings.filter(
+                              (b) => b.order_item_id === item.id
+                            )
+                          : [];
+                        if (itemBrandings.length === 0) return null;
+                        return (
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {itemBrandings.map((b) => (
+                              <span
+                                key={b.id}
+                                className="inline-flex items-center gap-1 rounded-md border border-indigo-200/70 bg-indigo-50/60 px-2 py-0.5 text-[11px] font-medium text-indigo-800 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300"
+                              >
+                                <span className="uppercase text-[10px] opacity-75">
+                                  {b.method}
+                                </span>
+                                <strong>{b.zone_name}</strong>
+                                {b.width_cm && b.height_cm
+                                  ? ` (${b.width_cm}×${b.height_cm}см)`
+                                  : ''}
+                                {b.roll_meters ? ` • ${b.roll_meters}м` : ''}
+                                {canViewCost
+                                  ? ` • собів. ${Number(b.unit_cost).toFixed(1)}${currencySymbol}/шт`
+                                  : ''}
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div className="flex shrink-0 items-center gap-4 text-xs tabular-nums text-slate-500 dark:text-slate-400">
                       <span>

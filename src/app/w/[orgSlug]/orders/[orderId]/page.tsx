@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import OrderDetailClient from './OrderDetailClient';
 import type {
   CashflowRecord,
+  OrderItemBrandingRecord,
   OrderRecord,
   OrderStatus,
   ProductRecord,
@@ -75,6 +76,16 @@ export default async function OrderDetailPage({
     notFound();
   }
 
+  const itemIds = (itemsRes.data || []).map((i) => i.id);
+  const brandingsRes =
+    itemIds.length > 0
+      ? await supabase
+          .from('order_item_brandings')
+          .select('*')
+          .eq('org_id', org.id)
+          .in('order_item_id', itemIds)
+      : { data: [] };
+
   const normalizedOrder = {
     ...orderRes.data,
     total_cost: canViewCost ? orderRes.data.total_cost : undefined,
@@ -88,6 +99,9 @@ export default async function OrderDetailPage({
       org={org}
       initialOrder={normalizedOrder}
       initialItems={itemsRes.data || []}
+      initialBrandings={
+        (brandingsRes.data || []) as OrderItemBrandingRecord[]
+      }
       statuses={(statusesRes.data || []) as OrderStatus[]}
       products={(productsRes.data || []) as unknown as ProductRecord[]}
       warehouses={(warehousesRes.data || []) as Array<{ id: string; name: string; is_default: boolean }>}

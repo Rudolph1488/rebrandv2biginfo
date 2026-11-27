@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import ProductsClient from './ProductsClient';
 import type {
   PrintOptionRecord,
+  PrintZoneRecord,
   ProductCategoryRecord,
   ProductRecord,
   WarehouseStockRecord,
@@ -51,7 +52,7 @@ export default async function ProductsPage({
     ? 'id, org_id, name, price, cost_price, is_active, position, created_at'
     : 'id, org_id, name, price, is_active, position, created_at';
 
-  const [productsRes, optionsRes, stockRes] = await Promise.all([
+  const [productsRes, optionsRes, stockRes, zonesRes] = await Promise.all([
     supabase
       .from('products')
       .select(columns)
@@ -69,6 +70,13 @@ export default async function ProductsPage({
         'id, org_id, warehouse_id, product_id, quantity, reserved_qty, min_quantity, updated_at, warehouse:warehouses(id, name)'
       )
       .eq('org_id', org.id),
+    supabase
+      .from('print_zones')
+      .select(
+        'id, org_id, name, default_width_cm, default_height_cm, position, is_active, created_at'
+      )
+      .eq('org_id', org.id)
+      .order('position', { ascending: true }),
   ]);
 
   return (
@@ -84,8 +92,12 @@ export default async function ProductsPage({
       initialPrintOptions={
         (optionsRes.data || []) as unknown as PrintOptionRecord[]
       }
+      initialPrintZones={
+        (zonesRes.data || []) as unknown as PrintZoneRecord[]
+      }
       printOptionsMigrationMissing={Boolean(optionsRes.error)}
       categoriesMigrationMissing={categoriesMigrationMissing}
+      printZonesMigrationMissing={Boolean(zonesRes.error)}
       canViewCost={canViewCost}
       canManage={isAdmin || permissions.products}
     />
