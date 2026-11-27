@@ -22,6 +22,7 @@ export interface DtfNestingResult {
   rotated: boolean;
   filmCostTotal: number;
   filmCostPerUnit: number;
+  pressCostPerUnit: number;
   costPerUnit: number;
   recommendedPricePerUnit: number;
 }
@@ -91,6 +92,7 @@ export function calculateDtfNesting(params: {
     rotated,
     filmCostTotal,
     filmCostPerUnit,
+    pressCostPerUnit: pressCost,
     costPerUnit,
     recommendedPricePerUnit,
   };

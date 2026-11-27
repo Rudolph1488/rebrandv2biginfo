@@ -1737,6 +1737,8 @@ export default function OrdersClient({
                                     settings: org.dtf_settings,
                                   });
                                   const zoneCostTotal = calc.costPerUnit * qty;
+                                  const pressCostTotal =
+                                    calc.pressCostPerUnit * qty;
                                   const zoneRecTotal =
                                     calc.recommendedPricePerUnit * qty;
                                   const zoneMargin =
@@ -1755,10 +1757,28 @@ export default function OrdersClient({
                                           {calc.perRow}/ряд • {calc.meters}м)
                                         </span>
                                       </span>
-                                      <div className="flex items-center gap-2 font-mono">
+                                      <div className="flex flex-wrap items-center gap-1.5 font-mono">
                                         <span>
-                                          собів. {zoneCostTotal.toFixed(1)}
-                                          {currencySymbol}
+                                          {pressCostTotal > 0 ? (
+                                            <>
+                                              плівка {calc.filmCostTotal.toFixed(1)}
+                                              {currencySymbol} + прес{' '}
+                                              {pressCostTotal.toFixed(0)}
+                                              {currencySymbol} ={' '}
+                                              <strong>
+                                                {zoneCostTotal.toFixed(1)}
+                                                {currencySymbol}
+                                              </strong>
+                                            </>
+                                          ) : (
+                                            <>
+                                              плівка{' '}
+                                              <strong>
+                                                {calc.filmCostTotal.toFixed(1)}
+                                                {currencySymbol}
+                                              </strong>
+                                            </>
+                                          )}
                                           {qty > 1
                                             ? ` (${calc.costPerUnit.toFixed(1)}/шт)`
                                             : ''}
