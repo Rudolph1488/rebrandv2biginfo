@@ -86,4 +86,10 @@ create policy "Permitted members can manage order item brandings"
     or public.has_org_permission(org_id, 'production')
   );
 
+grant select, insert, update, delete on public.print_zones to authenticated;
+grant all on public.print_zones to service_role;
+
+grant select, insert, update, delete on public.order_item_brandings to authenticated;
+grant all on public.order_item_brandings to service_role;
+
 notify pgrst, 'reload schema';

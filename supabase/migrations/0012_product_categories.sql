@@ -38,4 +38,7 @@ alter table public.products
 create index if not exists idx_products_category
   on public.products(category_id);
 
+grant select, insert, update, delete on public.product_categories to authenticated;
+grant all on public.product_categories to service_role;
+
 notify pgrst, 'reload schema';
