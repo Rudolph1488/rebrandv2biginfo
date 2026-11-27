@@ -464,6 +464,14 @@ export default function OrdersClient({
     (sum, i) => sum + (Number(i.qty) || 0) * (Number(i.unitCost) || 0),
     0
   );
+  const totalBaseCost = items.reduce(
+    (sum, i) => sum + (Number(i.qty) || 0) * (Number(i.baseCost) || 0),
+    0
+  );
+  const totalPrintCost = Math.max(0, totalCost - totalBaseCost);
+  const totalMargin = totalAmount - totalCost;
+  const totalMarginPct =
+    totalAmount > 0 ? Math.round((totalMargin / totalAmount) * 100) : 0;
 
   async function handleCreateOrder(e: React.FormEvent) {
     e.preventDefault();
@@ -1519,12 +1527,20 @@ export default function OrdersClient({
                               min="1"
                               value={item.draftW}
                               onChange={(e) => {
+                                const raw = e.target.value;
                                 const next = [...items];
                                 next[idx] = {
                                   ...item,
-                                  draftW: Number(e.target.value),
+                                  draftW: raw === '' ? '' : Number(raw),
                                 };
                                 setItems(next);
+                              }}
+                              onBlur={() => {
+                                if (item.draftW === '') {
+                                  const next = [...items];
+                                  next[idx] = { ...item, draftW: 10 };
+                                  setItems(next);
+                                }
                               }}
                               className="w-12 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-center text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white"
                               title="Ширина (см)"
@@ -1535,12 +1551,20 @@ export default function OrdersClient({
                               min="1"
                               value={item.draftH}
                               onChange={(e) => {
+                                const raw = e.target.value;
                                 const next = [...items];
                                 next[idx] = {
                                   ...item,
-                                  draftH: Number(e.target.value),
+                                  draftH: raw === '' ? '' : Number(raw),
                                 };
                                 setItems(next);
+                              }}
+                              onBlur={() => {
+                                if (item.draftH === '') {
+                                  const next = [...items];
+                                  next[idx] = { ...item, draftH: 10 };
+                                  setItems(next);
+                                }
                               }}
                               className="w-12 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-center text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white"
                               title="Висота (см)"
@@ -1641,41 +1665,232 @@ export default function OrdersClient({
                           </label>
                         </div>
 
-                        {canViewCost && (item.dtfZones.length > 0 || item.unitCost > 0) && (
-                          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-100/80 px-2.5 py-1 text-[11px] dark:bg-white/5">
-                            <span className="text-slate-600 dark:text-slate-300">
-                              Собівартість:{' '}
-                              <strong className="font-mono text-slate-900 dark:text-white">
-                                {item.unitCost.toFixed(2)} {currencySymbol}/шт
-                              </strong>
-                              {item.qty && Number(item.qty) > 1 && (
-                                <span className="ml-1 text-slate-500">
-                                  (разом {(item.unitCost * Number(item.qty)).toFixed(0)} {currencySymbol})
-                                </span>
-                              )}
-                            </span>
-                            <span className="font-semibold text-emerald-700 dark:text-emerald-400">
-                              Маржа: +
-                              {(((Number(item.unitPrice) || 0) - item.unitCost) * (Number(item.qty) || 1)).toFixed(0)}{' '}
-                              {currencySymbol}
-                            </span>
-                          </div>
-                        )}
+                        {canViewCost &&
+                          (item.dtfZones.length > 0 ||
+                            item.selectedOptionIds.length > 0 ||
+                            item.unitCost > 0) && (() => {
+                            const qty = Number(item.qty) || 1;
+                            const unitPrice = Number(item.unitPrice) || 0;
+                            const itemRevenue = unitPrice * qty;
+                            const itemCostTotal = item.unitCost * qty;
+                            const itemMargin = itemRevenue - itemCostTotal;
+                            const itemMarginPct =
+                              itemRevenue > 0
+                                ? Math.round((itemMargin / itemRevenue) * 100)
+                                : 0;
+                            const chosenOpts = printOptions.filter((o) =>
+                              item.selectedOptionIds.includes(o.id)
+                            );
+                            const baseMargin =
+                              (item.basePrice - item.baseCost) * qty;
+
+                            return (
+                              <div className="space-y-1.5 rounded-xl border border-slate-200/80 bg-slate-50/90 p-2.5 text-[11px] dark:border-white/10 dark:bg-white/[0.03]">
+                                <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                  <span>Деталізація (×{qty} шт)</span>
+                                  <span>Собівартість / Продаж / Маржа</span>
+                                </div>
+
+                                {(item.baseCost > 0 || item.basePrice > 0) && (
+                                  <div className="flex flex-wrap items-center justify-between gap-2 text-slate-600 dark:text-slate-300">
+                                    <span className="truncate font-medium">
+                                      Заготовка: {item.name || 'Товар'}
+                                    </span>
+                                    <div className="flex items-center gap-2 font-mono">
+                                      <span>
+                                        собів. {(item.baseCost * qty).toFixed(0)}
+                                        {currencySymbol}
+                                        {qty > 1
+                                          ? ` (${item.baseCost.toFixed(0)}/шт)`
+                                          : ''}
+                                      </span>
+                                      <span className="text-slate-300 dark:text-slate-600">
+                                        •
+                                      </span>
+                                      <span>
+                                        прод. {(item.basePrice * qty).toFixed(0)}
+                                        {currencySymbol}
+                                      </span>
+                                      <span className="text-slate-300 dark:text-slate-600">
+                                        •
+                                      </span>
+                                      <span
+                                        className={
+                                          baseMargin >= 0
+                                            ? 'font-semibold text-emerald-600 dark:text-emerald-400'
+                                            : 'font-semibold text-red-600 dark:text-red-400'
+                                        }
+                                      >
+                                        {baseMargin >= 0 ? '+' : ''}
+                                        {baseMargin.toFixed(0)}
+                                        {currencySymbol}
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {item.dtfZones.map((z, zIdx) => {
+                                  const calc = calculateDtfNesting({
+                                    widthCm: z.widthCm,
+                                    heightCm: z.heightCm,
+                                    qty,
+                                    settings: org.dtf_settings,
+                                  });
+                                  const zoneCostTotal = calc.costPerUnit * qty;
+                                  const zoneRecTotal =
+                                    calc.recommendedPricePerUnit * qty;
+                                  const zoneMargin =
+                                    zoneRecTotal - zoneCostTotal;
+                                  return (
+                                    <div
+                                      key={zIdx}
+                                      className="flex flex-wrap items-center justify-between gap-2 text-slate-600 dark:text-slate-300"
+                                    >
+                                      <span className="truncate">
+                                        <span className="font-medium text-indigo-700 dark:text-indigo-300">
+                                          DTF {z.zone}
+                                        </span>{' '}
+                                        <span className="text-slate-400">
+                                          ({z.widthCm}×{z.heightCm}см •{' '}
+                                          {calc.perRow}/ряд • {calc.meters}м)
+                                        </span>
+                                      </span>
+                                      <div className="flex items-center gap-2 font-mono">
+                                        <span>
+                                          собів. {zoneCostTotal.toFixed(1)}
+                                          {currencySymbol}
+                                          {qty > 1
+                                            ? ` (${calc.costPerUnit.toFixed(1)}/шт)`
+                                            : ''}
+                                        </span>
+                                        <span className="text-slate-300 dark:text-slate-600">
+                                          •
+                                        </span>
+                                        <span>
+                                          рек. {zoneRecTotal.toFixed(0)}
+                                          {currencySymbol}
+                                        </span>
+                                        <span className="text-slate-300 dark:text-slate-600">
+                                          •
+                                        </span>
+                                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                          +{zoneMargin.toFixed(0)}
+                                          {currencySymbol}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+
+                                {chosenOpts.map((opt) => {
+                                  const optCostTotal =
+                                    (Number(opt.cost_price) || 0) * qty;
+                                  const optPriceTotal =
+                                    (Number(opt.price) || 0) * qty;
+                                  const optMargin = optPriceTotal - optCostTotal;
+                                  return (
+                                    <div
+                                      key={opt.id}
+                                      className="flex flex-wrap items-center justify-between gap-2 text-slate-600 dark:text-slate-300"
+                                    >
+                                      <span className="truncate font-medium">
+                                        Опція: {opt.name}
+                                      </span>
+                                      <div className="flex items-center gap-2 font-mono">
+                                        <span>
+                                          собів. {optCostTotal.toFixed(0)}
+                                          {currencySymbol}
+                                        </span>
+                                        <span className="text-slate-300 dark:text-slate-600">
+                                          •
+                                        </span>
+                                        <span>
+                                          прод. {optPriceTotal.toFixed(0)}
+                                          {currencySymbol}
+                                        </span>
+                                        <span className="text-slate-300 dark:text-slate-600">
+                                          •
+                                        </span>
+                                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                          +{optMargin.toFixed(0)}
+                                          {currencySymbol}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-1.5 dark:border-white/10">
+                                  <span className="font-semibold text-slate-700 dark:text-slate-200">
+                                    Підсумок позиції: собів.{' '}
+                                    <span className="font-mono">
+                                      {item.unitCost.toFixed(2)} {currencySymbol}/шт
+                                    </span>
+                                    {qty > 1 && (
+                                      <span className="ml-1 font-normal text-slate-500">
+                                        (разом {itemCostTotal.toFixed(0)}{' '}
+                                        {currencySymbol})
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span
+                                    className={`font-semibold ${
+                                      itemMargin >= 0
+                                        ? 'text-emerald-700 dark:text-emerald-400'
+                                        : 'text-red-600 dark:text-red-400'
+                                    }`}
+                                  >
+                                    Маржа: {itemMargin >= 0 ? '+' : ''}
+                                    {itemMargin.toFixed(0)} {currencySymbol} (
+                                    {itemMarginPct}%)
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })()}
                       </div>
                     </div>
                   ))}
                 </div>
 
-                <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-2.5 text-sm dark:border-white/10">
-                  <span className="font-semibold text-slate-700 dark:text-slate-200">
-                    Разом: {totalAmount.toFixed(2)} {currencySymbol}
-                  </span>
-                  {canViewCost && (
-                    <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                      Маржа: {(totalAmount - totalCost).toFixed(2)}{' '}
-                      {currencySymbol}
-                    </span>
+                <div className="mt-3 space-y-1.5 border-t border-slate-200 pt-2.5 dark:border-white/10">
+                  {canViewCost && totalCost > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+                      <span>
+                        Собівартість:{' '}
+                        <strong className="font-mono text-slate-700 dark:text-slate-200">
+                          {totalCost.toFixed(2)} {currencySymbol}
+                        </strong>
+                        {totalBaseCost > 0 && totalPrintCost > 0 && (
+                          <span className="ml-1.5 text-[11px]">
+                            (заготовки {totalBaseCost.toFixed(0)}
+                            {currencySymbol} + нанесення{' '}
+                            {totalPrintCost.toFixed(0)}
+                            {currencySymbol})
+                          </span>
+                        )}
+                      </span>
+                      <span
+                        className={`font-semibold ${
+                          totalMargin >= 0
+                            ? 'text-emerald-700 dark:text-emerald-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}
+                      >
+                        Маржа: {totalMargin >= 0 ? '+' : ''}
+                        {totalMargin.toFixed(2)} {currencySymbol} (
+                        {totalMarginPct}%)
+                      </span>
+                    </div>
                   )}
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-semibold text-slate-700 dark:text-slate-200">
+                      Разом до сплати:
+                    </span>
+                    <span className="text-base font-bold text-slate-900 dark:text-white">
+                      {totalAmount.toFixed(2)} {currencySymbol}
+                    </span>
+                  </div>
                 </div>
               </div>
 
