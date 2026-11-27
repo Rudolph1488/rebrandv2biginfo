@@ -109,7 +109,7 @@ export function ProductDossierDrawer({
       onClick={onClose}
     >
       <div
-        className="flex h-full w-full max-w-lg flex-col overflow-y-auto border-l border-slate-200 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-[#131722]"
+        className="flex h-full w-full max-w-lg flex-col overflow-y-auto border-l border-slate-200 bg-white p-5 pb-8 shadow-2xl dark:border-white/10 dark:bg-[#131722] sm:p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-white/10">
@@ -223,7 +223,7 @@ export function ProductDossierDrawer({
                 disabled={!canManage || categoriesMigrationMissing}
                 value={categoryId}
                 onChange={(e) => setCategoryId(e.target.value)}
-                className={inputCls}
+                className={`${inputCls} dark:bg-[#131722]`}
               >
                 <option value="">Без папки</option>
                 {categories.map((c) => (
@@ -296,7 +296,7 @@ export function ProductDossierDrawer({
           )}
 
           {canManage && (
-            <div className="flex items-center justify-between gap-2 pt-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-3">
               <button
                 type="button"
                 onClick={() => onDeleted(product.id)}

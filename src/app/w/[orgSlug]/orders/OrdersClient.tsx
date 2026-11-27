@@ -327,7 +327,7 @@ export default function OrdersClient({
       if (data) setProductSearchResults(data as unknown as ProductRecord[]);
     }, 180);
     return () => clearTimeout(timer);
-  }, [activeItemIdx, activeItemQuery, org.id, canViewCost]);
+  }, [activeItemIdx, activeItemQuery, org.id, canViewCost, productCategories.length]);
 
   function handleSelectClientObj(found: ClientRecord) {
     setClientId(found.id);

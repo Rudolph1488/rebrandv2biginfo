@@ -1272,7 +1272,7 @@ export default function ProductsClient({
                         disabled={categoriesMigrationMissing}
                         value={categoryId}
                         onChange={(e) => setCategoryId(e.target.value)}
-                        className={inputCls}
+                        className={`${inputCls} dark:bg-[#131722]`}
                       >
                         <option value="">Без папки</option>
                         {categories.map((c) => (
