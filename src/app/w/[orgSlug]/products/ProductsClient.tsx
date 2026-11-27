@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -8,9 +8,12 @@ import {
   type DtfRollSettings,
 } from '@/lib/dtfCalculator';
 import type {
+  BrandingMode,
   Organization,
   PrintOptionRecord,
+  ProductCategoryRecord,
   ProductRecord,
+  WarehouseStockRecord,
 } from '@/types/crm';
 import {
   Plus,
@@ -21,6 +24,10 @@ import {
   Loader2,
   Layers,
   Package,
+  Folder,
+  FolderPlus,
+  Warehouse,
+  TrendingUp,
 } from 'lucide-react';
 
 const DEFAULT_PRINT_PRESETS = [
@@ -31,36 +38,84 @@ const DEFAULT_PRINT_PRESETS = [
   { name: 'Плече / Рукав', price: 100, cost_price: 35 },
 ];
 
+const DEFAULT_CATEGORY_PRESETS: Array<{
+  name: string;
+  branding_mode: BrandingMode;
+}> = [
+  { name: 'Одяг', branding_mode: 'apparel' },
+  { name: 'Чашки', branding_mode: 'sublimation' },
+  { name: 'Бейджі', branding_mode: 'sublimation' },
+];
+
+const BRANDING_MODE_META: Record<
+  BrandingMode,
+  { label: string; short: string; badgeCls: string; desc: string }
+> = {
+  apparel: {
+    label: 'Одяг (DTF + Вишивка)',
+    short: 'DTF / Вишивка',
+    badgeCls:
+      'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/30',
+    desc: 'У замовленні доступний вибір: DTF (зони + рулонний калькулятор) або Вишивка.',
+  },
+  sublimation: {
+    label: 'Сублімація (тільки макет)',
+    short: 'Сублімація',
+    badgeCls:
+      'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30',
+    desc: 'Без зон і калькулятора. Собівартість і ціна з номенклатури + прикріплення візуалки.',
+  },
+  none: {
+    label: 'Без брендування',
+    short: 'Звичайний',
+    badgeCls:
+      'bg-slate-100 text-slate-600 border-slate-200 dark:bg-white/10 dark:text-slate-300 dark:border-white/10',
+    desc: 'Звичайний товар або послуга без конструктора нанесення.',
+  },
+};
+
 export default function ProductsClient({
   org,
   initialProducts,
+  initialCategories = [],
+  initialStock = [],
   initialPrintOptions = [],
   printOptionsMigrationMissing = false,
+  categoriesMigrationMissing = false,
   canViewCost,
   canManage,
 }: {
   org: Organization;
   initialProducts: ProductRecord[];
+  initialCategories?: ProductCategoryRecord[];
+  initialStock?: WarehouseStockRecord[];
   initialPrintOptions?: PrintOptionRecord[];
   printOptionsMigrationMissing?: boolean;
+  categoriesMigrationMissing?: boolean;
   canViewCost: boolean;
   canManage: boolean;
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'products' | 'options'>('products');
   const [products, setProducts] = useState<ProductRecord[]>(initialProducts);
+  const [categories, setCategories] =
+    useState<ProductCategoryRecord[]>(initialCategories);
+  const [selectedFolder, setSelectedFolder] = useState<string>('all');
+
   const [printOptions, setPrintOptions] =
     useState<PrintOptionRecord[]>(initialPrintOptions);
   const [optName, setOptName] = useState('');
   const [optPrice, setOptPrice] = useState('150');
   const [optCost, setOptCost] = useState('50');
   const [savingOpt, setSavingOpt] = useState(false);
+
   const [dtfSettings, setDtfSettings] = useState<DtfRollSettings>({
     ...DEFAULT_DTF_SETTINGS,
     ...(org.dtf_settings || {}),
   });
   const [savingDtf, setSavingDtf] = useState(false);
   const [dtfSavedMsg, setDtfSavedMsg] = useState(false);
+
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -68,21 +123,87 @@ export default function ProductsClient({
 
   const [name, setName] = useState('');
   const [sku, setSku] = useState('');
-  const [category, setCategory] = useState('');
+  const [categoryId, setCategoryId] = useState('');
   const [salePrice, setSalePrice] = useState('0');
   const [costPrice, setCostPrice] = useState('0');
   const [unit, setUnit] = useState('шт');
 
+  // Category modal state
+  const [catModalOpen, setCatModalOpen] = useState(false);
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [catName, setCatName] = useState('');
+  const [catMode, setCatMode] = useState<BrandingMode>('apparel');
+  const [savingCat, setSavingCat] = useState(false);
+
+  // Product Dossier state
+  const [dossierProduct, setDossierProduct] = useState<ProductRecord | null>(
+    null
+  );
+  const [dosName, setDosName] = useState('');
+  const [dosSku, setDosSku] = useState('');
+  const [dosCategoryId, setDosCategoryId] = useState('');
+  const [dosSalePrice, setDosSalePrice] = useState('0');
+  const [dosCostPrice, setDosCostPrice] = useState('0');
+  const [dosUnit, setDosUnit] = useState('шт');
+  const [savingDos, setSavingDos] = useState(false);
+  const [dosSavedMsg, setDosSavedMsg] = useState(false);
+
   const currencySymbol =
     org.currency === 'USD' ? '$' : org.currency === 'EUR' ? '€' : '₴';
 
+  const categoryMap = useMemo(() => {
+    const m = new Map<string, ProductCategoryRecord>();
+    for (const c of categories) m.set(c.id, c);
+    return m;
+  }, [categories]);
+
+  const stockByProduct = useMemo(() => {
+    const m = new Map<string, WarehouseStockRecord[]>();
+    for (const s of initialStock) {
+      const list = m.get(s.product_id) || [];
+      list.push(s);
+      m.set(s.product_id, list);
+    }
+    return m;
+  }, [initialStock]);
+
+  function getTotalStock(productId: string) {
+    const list = stockByProduct.get(productId) || [];
+    return list.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
+  }
+
+  function resolveProductCategory(p: ProductRecord): ProductCategoryRecord | null {
+    if (p.category_id && categoryMap.has(p.category_id)) {
+      return categoryMap.get(p.category_id) || null;
+    }
+    if (p.category) {
+      return (
+        categories.find(
+          (c) => c.name.toLowerCase() === p.category!.toLowerCase()
+        ) || null
+      );
+    }
+    return null;
+  }
+
+  const uncategorizedCount = products.filter(
+    (p) => !resolveProductCategory(p)
+  ).length;
+
   const filtered = products.filter((p) => {
+    const resolvedCat = resolveProductCategory(p);
+    if (selectedFolder === 'uncategorized') {
+      if (resolvedCat) return false;
+    } else if (selectedFolder !== 'all') {
+      if (resolvedCat?.id !== selectedFolder) return false;
+    }
+
     const q = search.toLowerCase().trim();
     if (!q) return true;
     return (
       p.name.toLowerCase().includes(q) ||
       (p.sku || '').toLowerCase().includes(q) ||
-      (p.category || '').toLowerCase().includes(q)
+      (resolvedCat?.name || p.category || '').toLowerCase().includes(q)
     );
   });
 
@@ -90,7 +211,11 @@ export default function ProductsClient({
     setEditingId(null);
     setName('');
     setSku('');
-    setCategory('');
+    setCategoryId(
+      selectedFolder !== 'all' && selectedFolder !== 'uncategorized'
+        ? selectedFolder
+        : ''
+    );
     setSalePrice('0');
     setCostPrice('0');
     setUnit('шт');
@@ -101,11 +226,22 @@ export default function ProductsClient({
     setEditingId(p.id);
     setName(p.name);
     setSku(p.sku || '');
-    setCategory(p.category || '');
+    setCategoryId(resolveProductCategory(p)?.id || '');
     setSalePrice(String(p.sale_price));
     setCostPrice(String(p.cost_price ?? 0));
     setUnit(p.unit || 'шт');
     setModalOpen(true);
+  }
+
+  function openDossier(p: ProductRecord) {
+    setDossierProduct(p);
+    setDosName(p.name);
+    setDosSku(p.sku || '');
+    setDosCategoryId(resolveProductCategory(p)?.id || '');
+    setDosSalePrice(String(p.sale_price));
+    setDosCostPrice(String(p.cost_price ?? 0));
+    setDosUnit(p.unit || 'шт');
+    setDosSavedMsg(false);
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -113,16 +249,19 @@ export default function ProductsClient({
     setSaving(true);
     const supabase = createClient();
 
+    const chosenCat = categoryId ? categoryMap.get(categoryId) || null : null;
     const payload: Record<string, unknown> = {
       org_id: org.id,
       name: name.trim(),
       sku: sku.trim() || null,
-      category: category.trim() || null,
+      category: chosenCat ? chosenCat.name : null,
       sale_price: Number(salePrice) || 0,
       unit: unit.trim() || 'шт',
       updated_at: new Date().toISOString(),
     };
-
+    if (!categoriesMigrationMissing) {
+      payload.category_id = chosenCat ? chosenCat.id : null;
+    }
     if (canViewCost) {
       payload.cost_price = Number(costPrice) || 0;
     }
@@ -157,11 +296,144 @@ export default function ProductsClient({
     router.refresh();
   }
 
+  async function handleSaveDossier(e: React.FormEvent) {
+    e.preventDefault();
+    if (!dossierProduct) return;
+    setSavingDos(true);
+    setDosSavedMsg(false);
+    const supabase = createClient();
+
+    const chosenCat = dosCategoryId
+      ? categoryMap.get(dosCategoryId) || null
+      : null;
+    const payload: Record<string, unknown> = {
+      name: dosName.trim(),
+      sku: dosSku.trim() || null,
+      category: chosenCat ? chosenCat.name : null,
+      sale_price: Number(dosSalePrice) || 0,
+      unit: dosUnit.trim() || 'шт',
+      updated_at: new Date().toISOString(),
+    };
+    if (!categoriesMigrationMissing) {
+      payload.category_id = chosenCat ? chosenCat.id : null;
+    }
+    if (canViewCost) {
+      payload.cost_price = Number(dosCostPrice) || 0;
+    }
+
+    const { data, error } = await supabase
+      .from('products')
+      .update(payload)
+      .eq('id', dossierProduct.id)
+      .select()
+      .single();
+
+    setSavingDos(false);
+    if (!error && data) {
+      const updated = data as ProductRecord;
+      setProducts(products.map((p) => (p.id === updated.id ? updated : p)));
+      setDossierProduct(updated);
+      setDosSavedMsg(true);
+      setTimeout(() => setDosSavedMsg(false), 2500);
+      router.refresh();
+    }
+  }
+
   async function handleDelete(id: string) {
     const supabase = createClient();
     const { error } = await supabase.from('products').delete().eq('id', id);
     if (!error) {
       setProducts(products.filter((p) => p.id !== id));
+      if (dossierProduct?.id === id) setDossierProduct(null);
+      router.refresh();
+    }
+  }
+
+  function openCreateCategory() {
+    setEditingCatId(null);
+    setCatName('');
+    setCatMode('apparel');
+    setCatModalOpen(true);
+  }
+
+  function openEditCategory(c: ProductCategoryRecord) {
+    setEditingCatId(c.id);
+    setCatName(c.name);
+    setCatMode(c.branding_mode);
+    setCatModalOpen(true);
+  }
+
+  async function handleSaveCategory(e: React.FormEvent) {
+    e.preventDefault();
+    if (!catName.trim()) return;
+    setSavingCat(true);
+    const supabase = createClient();
+
+    if (editingCatId) {
+      const { data, error } = await supabase
+        .from('product_categories')
+        .update({ name: catName.trim(), branding_mode: catMode })
+        .eq('id', editingCatId)
+        .select()
+        .single();
+      if (!error && data) {
+        setCategories(
+          categories.map((c) =>
+            c.id === editingCatId ? (data as ProductCategoryRecord) : c
+          )
+        );
+      }
+    } else {
+      const { data, error } = await supabase
+        .from('product_categories')
+        .insert({
+          org_id: org.id,
+          name: catName.trim(),
+          branding_mode: catMode,
+          position: categories.length,
+        })
+        .select()
+        .single();
+      if (!error && data) {
+        setCategories([...categories, data as ProductCategoryRecord]);
+      }
+    }
+
+    setSavingCat(false);
+    setCatModalOpen(false);
+    router.refresh();
+  }
+
+  async function handleSeedCategories() {
+    setSavingCat(true);
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('product_categories')
+      .insert(
+        DEFAULT_CATEGORY_PRESETS.map((c, idx) => ({
+          org_id: org.id,
+          name: c.name,
+          branding_mode: c.branding_mode,
+          position: categories.length + idx,
+        }))
+      )
+      .select();
+    setSavingCat(false);
+    if (!error && data) {
+      setCategories([...categories, ...(data as ProductCategoryRecord[])]);
+      router.refresh();
+    }
+  }
+
+  async function handleDeleteCategory(id: string) {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from('product_categories')
+      .delete()
+      .eq('id', id);
+    if (!error) {
+      setCategories(categories.filter((c) => c.id !== id));
+      if (selectedFolder === id) setSelectedFolder('all');
       router.refresh();
     }
   }
@@ -249,19 +521,30 @@ export default function ProductsClient({
             Номенклатура
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Товари та послуги компанії ({products.length})
+            Категорії, товари, залишки та налаштування брендування ({products.length})
           </p>
         </div>
 
         {canManage && activeTab === 'products' && (
-          <button
-            type="button"
-            onClick={openCreate}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:opacity-90 sm:w-auto"
-            style={{ backgroundColor: org.primary_color }}
-          >
-            <Plus className="h-4 w-4" /> Додати позицію
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {!categoriesMigrationMissing && (
+              <button
+                type="button"
+                onClick={openCreateCategory}
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 shadow-2xs transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 sm:flex-none"
+              >
+                <FolderPlus className="h-4 w-4" /> + Категорія
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={openCreate}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:opacity-90 sm:flex-none"
+              style={{ backgroundColor: org.primary_color }}
+            >
+              <Plus className="h-4 w-4" /> Додати позицію
+            </button>
+          </div>
         )}
       </div>
 
@@ -316,15 +599,16 @@ export default function ProductsClient({
                   Калькулятор DTF-рулону (авторозрахунок собівартості)
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Система автоматично розкладає принти на ширину рулону з урахуванням відступів і тиражу
+                  Система автоматично розкладає принти на ширину рулону з урахуванням відступів та кількості
                 </p>
               </div>
               {dtfSavedMsg && (
-                <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                  ✓ Налаштування збережено
+                <span className="rounded-lg bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
+                  Збережено ✓
                 </span>
               )}
             </div>
+
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
               <div>
                 <label className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-400">
@@ -345,7 +629,7 @@ export default function ProductsClient({
               </div>
               <div>
                 <label className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-400">
-                  Ціна за 1 м.п. ({currencySymbol})
+                  Ціна за метр ({currencySymbol})
                 </label>
                 <input
                   type="number"
@@ -362,7 +646,7 @@ export default function ProductsClient({
               </div>
               <div>
                 <label className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-400">
-                  Відступ між принт. (см)
+                  Відступ (см)
                 </label>
                 <input
                   type="number"
@@ -432,7 +716,7 @@ export default function ProductsClient({
             >
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-                  Нова зона / формат нанесення
+                  Фіксовані послуги (Вишивка / доп. опції)
                 </h2>
                 {printOptions.length === 0 && (
                   <button
@@ -450,7 +734,7 @@ export default function ProductsClient({
                   required
                   value={optName}
                   onChange={(e) => setOptName(e.target.value)}
-                  placeholder="Напр. Спина А3 (ДТФ)"
+                  placeholder="Напр. Вишивка лого на серці"
                   className={`${inputCls} sm:col-span-2`}
                 />
                 <input
@@ -526,281 +810,805 @@ export default function ProductsClient({
         </div>
       ) : (
         <>
+          {categoriesMigrationMissing && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+              Виконай SQL-міграцію{' '}
+              <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs dark:bg-amber-500/20">
+                0012_product_categories.sql
+              </code>{' '}
+              у Supabase → SQL Editor, щоб увімкнути папки категорій.
+            </div>
+          )}
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Пошук за назвою, артикулом чи категорією..."
-          className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm text-slate-900 outline-none focus:border-slate-400 dark:border-white/10 dark:bg-[#0d1017] dark:text-white"
-        />
-      </div>
+          {/* Category Folders Bar */}
+          {!categoriesMigrationMissing && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedFolder('all')}
+                  className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                    selectedFolder === 'all'
+                      ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-[#0d1017] dark:text-slate-300'
+                  }`}
+                >
+                  <Folder className="h-3.5 w-3.5" />
+                  Усі ({products.length})
+                </button>
 
-      {/* MOBILE CARDS */}
-      <div className="space-y-3 md:hidden">
-        {filtered.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-500 dark:border-white/10 dark:bg-[#0d1017] dark:text-slate-400">
-            Позицій поки немає.
-          </div>
-        ) : (
-          filtered.map((p) => {
-            const margin =
-              canViewCost && p.cost_price !== undefined
-                ? Number(p.sale_price) - Number(p.cost_price)
-                : 0;
-            return (
-              <div
-                key={p.id}
-                className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs dark:border-white/10 dark:bg-[#0d1017]"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-bold text-slate-900 dark:text-white">
-                      {p.name}
-                    </p>
-                    <p className="mt-0.5 text-xs text-slate-400">
-                      {p.sku ? `${p.sku} • ` : ''}
-                      {p.category || 'Без категорії'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(p)}
-                      className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"
-                    >
-                      <Edit3 className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(p.id)}
-                      className="rounded-lg p-2 text-slate-400 hover:text-red-600"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5 text-sm dark:border-white/10">
-                  <span className="font-bold tabular-nums text-slate-900 dark:text-white">
-                    {Number(p.sale_price).toFixed(2)} {currencySymbol} / {p.unit}
-                  </span>
-                  {canViewCost && (
-                    <span className="text-xs font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-                      Маржа: +{margin.toFixed(0)} {currencySymbol}
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      {/* DESKTOP TABLE */}
-      <div className="hidden overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xs dark:border-white/10 dark:bg-[#0d1017] md:block">
-        {filtered.length === 0 ? (
-          <div className="p-10 text-center text-sm text-slate-500 dark:text-slate-400">
-            Позицій поки немає. Додайте перший товар або послугу.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-slate-100 bg-slate-50/70 text-[11px] uppercase tracking-wider text-slate-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-slate-400">
-                <tr>
-                  <th className="px-5 py-3.5">Назва / Артикул</th>
-                  <th className="px-5 py-3.5">Категорія</th>
-                  <th className="px-5 py-3.5">Ціна продажу</th>
-                  {canViewCost && <th className="px-5 py-3.5">Собівартість</th>}
-                  {canViewCost && <th className="px-5 py-3.5">Маржа</th>}
-                  <th className="px-5 py-3.5 text-right">Дії</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-white/10">
-                {filtered.map((p) => {
-                  const margin =
-                    canViewCost && p.cost_price !== undefined
-                      ? Number(p.sale_price) - Number(p.cost_price)
-                      : 0;
+                {categories.map((cat) => {
+                  const count = products.filter(
+                    (p) => resolveProductCategory(p)?.id === cat.id
+                  ).length;
+                  const meta =
+                    BRANDING_MODE_META[cat.branding_mode] ||
+                    BRANDING_MODE_META.none;
+                  const active = selectedFolder === cat.id;
                   return (
-                    <tr
-                      key={p.id}
-                      className="hover:bg-slate-50/60 dark:hover:bg-white/[0.02]"
+                    <div
+                      key={cat.id}
+                      className={`group inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
+                        active
+                          ? 'border-indigo-600 bg-indigo-600 text-white'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-indigo-300 dark:border-white/10 dark:bg-[#0d1017] dark:text-slate-200'
+                      }`}
                     >
-                      <td className="px-5 py-3.5">
-                        <p className="font-semibold text-slate-900 dark:text-white">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFolder(cat.id)}
+                        className="inline-flex items-center gap-1.5"
+                      >
+                        <Folder className="h-3.5 w-3.5 shrink-0" />
+                        <span>{cat.name}</span>
+                        <span
+                          className={`rounded-md px-1.5 py-0.5 text-[10px] ${
+                            active
+                              ? 'bg-white/20 text-white'
+                              : 'bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400'
+                          }`}
+                        >
+                          {count}
+                        </span>
+                        <span
+                          className={`hidden rounded-md px-1.5 py-0.5 text-[10px] sm:inline ${
+                            active ? 'bg-white/15 text-white' : meta.badgeCls
+                          }`}
+                        >
+                          {meta.short}
+                        </span>
+                      </button>
+                      {canManage && (
+                        <button
+                          type="button"
+                          onClick={() => openEditCategory(cat)}
+                          title="Налаштувати категорію"
+                          className={`ml-0.5 rounded p-0.5 opacity-70 hover:opacity-100 ${
+                            active ? 'text-white' : 'text-slate-400'
+                          }`}
+                        >
+                          <Edit3 className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {uncategorizedCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedFolder('uncategorized')}
+                    className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                      selectedFolder === 'uncategorized'
+                        ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900'
+                        : 'border-dashed border-slate-300 bg-white text-slate-500 hover:bg-slate-50 dark:border-white/15 dark:bg-[#0d1017] dark:text-slate-400'
+                    }`}
+                  >
+                    Без папки ({uncategorizedCount})
+                  </button>
+                )}
+
+                {canManage && categories.length === 0 && (
+                  <button
+                    type="button"
+                    disabled={savingCat}
+                    onClick={handleSeedCategories}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-500/15 dark:text-indigo-300"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Створити типові папки (Одяг, Чашки, Бейджі)
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="relative max-w-md">
+            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Пошук за назвою, артикулом чи категорією..."
+              className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm text-slate-900 outline-none focus:border-slate-400 dark:border-white/10 dark:bg-[#0d1017] dark:text-white"
+            />
+          </div>
+
+          {/* MOBILE CARDS */}
+          <div className="space-y-3 md:hidden">
+            {filtered.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-500 dark:border-white/10 dark:bg-[#0d1017] dark:text-slate-400">
+                Позицій у цій папці поки немає.
+              </div>
+            ) : (
+              filtered.map((p) => {
+                const margin =
+                  canViewCost && p.cost_price !== undefined
+                    ? Number(p.sale_price) - Number(p.cost_price)
+                    : 0;
+                const cat = resolveProductCategory(p);
+                const stock = getTotalStock(p.id);
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => openDossier(p)}
+                    className="cursor-pointer rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs transition active:scale-[0.99] dark:border-white/10 dark:bg-[#0d1017]"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-bold text-slate-900 dark:text-white">
                           {p.name}
                         </p>
-                        {p.sku && (
-                          <p className="font-mono text-xs text-slate-400">
-                            {p.sku}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
-                        {p.category || '—'}
-                      </td>
-                      <td className="px-5 py-3.5 font-semibold tabular-nums text-slate-900 dark:text-white">
-                        {Number(p.sale_price).toFixed(2)} {currencySymbol} /{' '}
-                        {p.unit}
-                      </td>
-                      {canViewCost && (
-                        <td className="px-5 py-3.5 tabular-nums text-slate-600 dark:text-slate-400">
-                          {Number(p.cost_price ?? 0).toFixed(2)}{' '}
-                          {currencySymbol}
-                        </td>
-                      )}
-                      {canViewCost && (
-                        <td className="px-5 py-3.5 font-medium tabular-nums text-emerald-700 dark:text-emerald-400">
-                          +{margin.toFixed(2)} {currencySymbol}
-                        </td>
-                      )}
-                      <td className="px-5 py-3.5 text-right">
-                        <div className="inline-flex items-center gap-1">
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                          {p.sku && <span className="font-mono">{p.sku}</span>}
+                          {cat ? (
+                            <span
+                              className={`rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${
+                                BRANDING_MODE_META[cat.branding_mode].badgeCls
+                              }`}
+                            >
+                              {cat.name}
+                            </span>
+                          ) : (
+                            <span>{p.category || 'Без папки'}</span>
+                          )}
+                          <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                            <Warehouse className="h-2.5 w-2.5" /> {stock} {p.unit}
+                          </span>
+                        </div>
+                      </div>
+                      {canManage && (
+                        <div
+                          className="flex items-center gap-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <button
                             type="button"
                             onClick={() => openEdit(p)}
-                            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white"
+                            className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10"
                           >
                             <Edit3 className="h-4 w-4" />
                           </button>
                           <button
                             type="button"
                             onClick={() => handleDelete(p.id)}
-                            className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                            className="rounded-lg p-2 text-slate-400 hover:text-red-600"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      )}
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5 text-sm dark:border-white/10">
+                      <span className="font-bold tabular-nums text-slate-900 dark:text-white">
+                        {Number(p.sale_price).toFixed(2)} {currencySymbol} /{' '}
+                        {p.unit}
+                      </span>
+                      {canViewCost && (
+                        <span className="text-xs font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                          Маржа: +{margin.toFixed(0)} {currencySymbol}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
-        )}
-      </div>
 
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-xs sm:items-center sm:p-4">
-          <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-[#131722] sm:rounded-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                {editingId ? 'Редагувати позицію' : 'Нова позиція'}
-              </h2>
-              <button
-                type="button"
-                onClick={() => setModalOpen(false)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10"
+          {/* DESKTOP TABLE */}
+          <div className="hidden overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xs dark:border-white/10 dark:bg-[#0d1017] md:block">
+            {filtered.length === 0 ? (
+              <div className="p-10 text-center text-sm text-slate-500 dark:text-slate-400">
+                Позицій у цій папці поки немає. Додайте товар або оберіть іншу папку.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-slate-100 bg-slate-50/70 text-[11px] uppercase tracking-wider text-slate-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-slate-400">
+                    <tr>
+                      <th className="px-5 py-3.5">Назва / Артикул</th>
+                      <th className="px-5 py-3.5">Папка / Брендування</th>
+                      <th className="px-5 py-3.5">Залишок</th>
+                      <th className="px-5 py-3.5">Ціна продажу</th>
+                      {canViewCost && <th className="px-5 py-3.5">Собівартість</th>}
+                      {canViewCost && <th className="px-5 py-3.5">Маржа</th>}
+                      <th className="px-5 py-3.5 text-right">Дії</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-white/10">
+                    {filtered.map((p) => {
+                      const margin =
+                        canViewCost && p.cost_price !== undefined
+                          ? Number(p.sale_price) - Number(p.cost_price)
+                          : 0;
+                      const cat = resolveProductCategory(p);
+                      const stock = getTotalStock(p.id);
+                      return (
+                        <tr
+                          key={p.id}
+                          onClick={() => openDossier(p)}
+                          className="cursor-pointer transition hover:bg-slate-50/80 dark:hover:bg-white/[0.03]"
+                        >
+                          <td className="px-5 py-3.5">
+                            <p className="font-semibold text-slate-900 dark:text-white">
+                              {p.name}
+                            </p>
+                            {p.sku && (
+                              <p className="font-mono text-xs text-slate-400">
+                                {p.sku}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-5 py-3.5">
+                            {cat ? (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="font-medium text-slate-700 dark:text-slate-200">
+                                  {cat.name}
+                                </span>
+                                <span
+                                  className={`rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${
+                                    BRANDING_MODE_META[cat.branding_mode]
+                                      .badgeCls
+                                  }`}
+                                >
+                                  {BRANDING_MODE_META[cat.branding_mode].short}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400">
+                                {p.category || '—'}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-semibold tabular-nums ${
+                                stock > 0
+                                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+                                  : 'bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-400'
+                              }`}
+                            >
+                              {stock} {p.unit}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5 font-semibold tabular-nums text-slate-900 dark:text-white">
+                            {Number(p.sale_price).toFixed(2)} {currencySymbol} /{' '}
+                            {p.unit}
+                          </td>
+                          {canViewCost && (
+                            <td className="px-5 py-3.5 tabular-nums text-slate-600 dark:text-slate-400">
+                              {Number(p.cost_price ?? 0).toFixed(2)}{' '}
+                              {currencySymbol}
+                            </td>
+                          )}
+                          {canViewCost && (
+                            <td className="px-5 py-3.5 font-medium tabular-nums text-emerald-700 dark:text-emerald-400">
+                              +{margin.toFixed(2)} {currencySymbol}
+                            </td>
+                          )}
+                          <td
+                            className="px-5 py-3.5 text-right"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {canManage && (
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => openEdit(p)}
+                                  className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white"
+                                >
+                                  <Edit3 className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelete(p.id)}
+                                  className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* PRODUCT DOSSIER DRAWER */}
+          {dossierProduct && (
+            <div
+              className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-xs"
+              onClick={() => setDossierProduct(null)}
+            >
+              <div
+                className="flex h-full w-full max-w-lg flex-col overflow-y-auto border-l border-slate-200 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-[#131722]"
+                onClick={(e) => e.stopPropagation()}
               >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSave} className="space-y-3.5">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
-                  Назва *
-                </label>
-                <input
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Худі оверсайз з принтом"
-                  className={inputCls}
-                />
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
-                    Артикул (SKU)
-                  </label>
-                  <input
-                    value={sku}
-                    onChange={(e) => setSku(e.target.value)}
-                    placeholder="HD-001"
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
-                    Категорія
-                  </label>
-                  <input
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    placeholder="Одяг"
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
-                    Ціна ({currencySymbol})
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={salePrice}
-                    onChange={(e) => setSalePrice(e.target.value)}
-                    className={inputCls}
-                  />
-                </div>
-                {canViewCost && (
+                <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-white/10">
                   <div>
-                    <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
-                      Собівартість
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                      Досьє номенклатури
+                    </span>
+                    <h2 className="mt-0.5 text-xl font-bold text-slate-900 dark:text-white">
+                      {dossierProduct.name}
+                    </h2>
+                    {dossierProduct.sku && (
+                      <p className="mt-0.5 font-mono text-xs text-slate-400">
+                        SKU: {dossierProduct.sku}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDossierProduct(null)}
+                    className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                {/* Stock across warehouses */}
+                <div className="mt-5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      <Warehouse className="h-3.5 w-3.5" /> Залишки по складах
+                    </h3>
+                    <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-800 dark:bg-white/10 dark:text-white">
+                      Всього: {getTotalStock(dossierProduct.id)}{' '}
+                      {dossierProduct.unit}
+                    </span>
+                  </div>
+
+                  {(() => {
+                    const rows = stockByProduct.get(dossierProduct.id) || [];
+                    if (rows.length === 0) {
+                      return (
+                        <div className="rounded-xl border border-dashed border-slate-200 p-3.5 text-xs text-slate-500 dark:border-white/10 dark:text-slate-400">
+                          Поки немає записів залишків на складах (приход можна
+                          оформити в розділі «Склади»).
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="divide-y divide-slate-100 rounded-xl border border-slate-200/80 dark:divide-white/10 dark:border-white/10">
+                        {rows.map((st) => (
+                          <div
+                            key={st.id}
+                            className="flex items-center justify-between px-3.5 py-2.5 text-xs"
+                          >
+                            <div>
+                              <p className="font-semibold text-slate-800 dark:text-slate-200">
+                                {st.warehouse?.name || 'Склад'}
+                              </p>
+                              {st.reserved_qty > 0 && (
+                                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                                  В резерві: {st.reserved_qty}{' '}
+                                  {dossierProduct.unit}
+                                </p>
+                              )}
+                            </div>
+                            <span className="font-mono text-sm font-bold text-slate-900 dark:text-white">
+                              {st.quantity} {dossierProduct.unit}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Quick Edit Form inside Dossier */}
+                <form onSubmit={handleSaveDossier} className="mt-6 space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      <TrendingUp className="h-3.5 w-3.5" /> Параметри та
+                      собівартість
+                    </h3>
+                    {dosSavedMsg && (
+                      <span className="rounded-lg bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
+                        Збережено ✓
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                      Назва
                     </label>
                     <input
-                      type="number"
-                      step="0.01"
-                      value={costPrice}
-                      onChange={(e) => setCostPrice(e.target.value)}
+                      required
+                      disabled={!canManage}
+                      value={dosName}
+                      onChange={(e) => setDosName(e.target.value)}
                       className={inputCls}
                     />
                   </div>
-                )}
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
-                    Од. виміру
-                  </label>
-                  <input
-                    value={unit}
-                    onChange={(e) => setUnit(e.target.value)}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/5"
-                >
-                  Скасувати
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-                  style={{ backgroundColor: org.primary_color }}
-                >
-                  {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Зберегти
-                </button>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                        Артикул (SKU)
+                      </label>
+                      <input
+                        disabled={!canManage}
+                        value={dosSku}
+                        onChange={(e) => setDosSku(e.target.value)}
+                        className={inputCls}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                        Папка (категорія)
+                      </label>
+                      <select
+                        disabled={!canManage || categoriesMigrationMissing}
+                        value={dosCategoryId}
+                        onChange={(e) => setDosCategoryId(e.target.value)}
+                        className={inputCls}
+                      >
+                        <option value="">Без папки</option>
+                        {categories.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({BRANDING_MODE_META[c.branding_mode].short})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {canViewCost && (
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                          Собівартість ({currencySymbol})
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          disabled={!canManage}
+                          value={dosCostPrice}
+                          onChange={(e) => setDosCostPrice(e.target.value)}
+                          className={inputCls}
+                        />
+                      </div>
+                    )}
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                        Ціна продажу ({currencySymbol})
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        disabled={!canManage}
+                        value={dosSalePrice}
+                        onChange={(e) => setDosSalePrice(e.target.value)}
+                        className={inputCls}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                        Одиниця
+                      </label>
+                      <input
+                        disabled={!canManage}
+                        value={dosUnit}
+                        onChange={(e) => setDosUnit(e.target.value)}
+                        className={inputCls}
+                      />
+                    </div>
+                  </div>
+
+                  {canViewCost && (() => {
+                    const sale = Number(dosSalePrice) || 0;
+                    const cost = Number(dosCostPrice) || 0;
+                    const margin = sale - cost;
+                    const pct = sale > 0 ? Math.round((margin / sale) * 100) : 0;
+                    return (
+                      <div className="flex items-center justify-between rounded-xl bg-slate-100/80 px-3.5 py-2.5 text-xs dark:bg-white/5">
+                        <span className="text-slate-600 dark:text-slate-300">
+                          Маржа з одиниці (без нанесення):
+                        </span>
+                        <span
+                          className={`font-mono font-bold ${
+                            margin >= 0
+                              ? 'text-emerald-700 dark:text-emerald-400'
+                              : 'text-red-600 dark:text-red-400'
+                          }`}
+                        >
+                          {margin >= 0 ? '+' : ''}
+                          {margin.toFixed(2)} {currencySymbol} ({pct}%)
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {canManage && (
+                    <div className="flex items-center justify-between gap-2 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(dossierProduct.id)}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 px-3.5 py-2.5 text-xs font-semibold text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Видалити
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={savingDos}
+                        className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-xs font-semibold text-white disabled:opacity-60"
+                        style={{ backgroundColor: org.primary_color }}
+                      >
+                        {savingDos && (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        )}
+                        Зберегти зміни
+                      </button>
+                    </div>
+                  )}
+                </form>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+            </div>
+          )}
+
+          {/* CATEGORY MODAL */}
+          {catModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-xs sm:items-center sm:p-4">
+              <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-[#131722] sm:rounded-2xl">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                    {editingCatId ? 'Редагувати папку' : 'Нова категорія (папка)'}
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setCatModalOpen(false)}
+                    className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveCategory} className="space-y-4">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Назва папки *
+                    </label>
+                    <input
+                      required
+                      value={catName}
+                      onChange={(e) => setCatName(e.target.value)}
+                      placeholder="Напр. Одяг, Чашки, Бейджі"
+                      className={inputCls}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Спосіб брендування в замовленні
+                    </label>
+                    {(
+                      ['apparel', 'sublimation', 'none'] as BrandingMode[]
+                    ).map((m) => {
+                      const meta = BRANDING_MODE_META[m];
+                      return (
+                        <label
+                          key={m}
+                          className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition ${
+                            catMode === m
+                              ? 'border-indigo-600 bg-indigo-50/50 dark:border-indigo-500 dark:bg-indigo-500/10'
+                              : 'border-slate-200 dark:border-white/10'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="branding_mode"
+                            checked={catMode === m}
+                            onChange={() => setCatMode(m)}
+                            className="mt-0.5"
+                          />
+                          <div>
+                            <p className="text-xs font-bold text-slate-900 dark:text-white">
+                              {meta.label}
+                            </p>
+                            <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                              {meta.desc}
+                            </p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-2">
+                    {editingCatId ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleDeleteCategory(editingCatId);
+                          setCatModalOpen(false);
+                        }}
+                        className="rounded-xl border border-red-200 px-3.5 py-2.5 text-xs font-semibold text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:text-red-400"
+                      >
+                        Видалити
+                      </button>
+                    ) : (
+                      <span />
+                    )}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCatModalOpen(false)}
+                        className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:text-slate-300"
+                      >
+                        Скасувати
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={savingCat}
+                        className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                        style={{ backgroundColor: org.primary_color }}
+                      >
+                        {savingCat && (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        )}
+                        Зберегти
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* PRODUCT CREATE / EDIT MODAL */}
+          {modalOpen && (
+            <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-xs sm:items-center sm:p-4">
+              <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-[#131722] sm:rounded-2xl">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                    {editingId ? 'Редагувати позицію' : 'Нова позиція'}
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setModalOpen(false)}
+                    className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSave} className="space-y-3.5">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                      Назва *
+                    </label>
+                    <input
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Худі оверсайз / Чашка біла"
+                      className={inputCls}
+                    />
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Артикул (SKU)
+                      </label>
+                      <input
+                        value={sku}
+                        onChange={(e) => setSku(e.target.value)}
+                        placeholder="HD-001"
+                        className={inputCls}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Папка (категорія)
+                      </label>
+                      <select
+                        disabled={categoriesMigrationMissing}
+                        value={categoryId}
+                        onChange={(e) => setCategoryId(e.target.value)}
+                        className={inputCls}
+                      >
+                        <option value="">Без папки</option>
+                        {categories.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({BRANDING_MODE_META[c.branding_mode].short})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Ціна ({currencySymbol})
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={salePrice}
+                        onChange={(e) => setSalePrice(e.target.value)}
+                        className={inputCls}
+                      />
+                    </div>
+                    {canViewCost && (
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                          Собівартість
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={costPrice}
+                          onChange={(e) => setCostPrice(e.target.value)}
+                          className={inputCls}
+                        />
+                      </div>
+                    )}
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
+                        Од. виміру
+                      </label>
+                      <input
+                        value={unit}
+                        onChange={(e) => setUnit(e.target.value)}
+                        className={inputCls}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setModalOpen(false)}
+                      className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/5"
+                    >
+                      Скасувати
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                      style={{ backgroundColor: org.primary_color }}
+                    >
+                      {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                      Зберегти
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

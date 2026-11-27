@@ -71,12 +71,24 @@ export interface ClientRecord {
   created_at: string;
 }
 
+export type BrandingMode = 'none' | 'apparel' | 'sublimation';
+
+export interface ProductCategoryRecord {
+  id: string;
+  org_id: string;
+  name: string;
+  branding_mode: BrandingMode;
+  position: number;
+  created_at: string;
+}
+
 export interface ProductRecord {
   id: string;
   org_id: string;
   name: string;
   sku: string | null;
   category: string | null;
+  category_id?: string | null;
   sale_price: number;
   cost_price?: number;
   unit: string;

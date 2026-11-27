@@ -7,6 +7,7 @@ import type {
   OrderRecord,
   OrderStatus,
   PrintOptionRecord,
+  ProductCategoryRecord,
   ProductRecord,
 } from '@/types/crm';
 
@@ -70,6 +71,23 @@ export default async function OrdersPage({
     }
   }
 
+  const categoriesRes = await supabase
+    .from('product_categories')
+    .select('id, org_id, name, branding_mode, position, created_at')
+    .eq('org_id', org.id)
+    .order('position', { ascending: true });
+
+  const hasCatTable = !categoriesRes.error;
+  const prodCols = [
+    'id',
+    'name',
+    'category',
+    ...(hasCatTable ? ['category_id'] : []),
+    'sale_price',
+    ...(canViewCost ? ['cost_price'] : []),
+    'unit',
+  ].join(', ');
+
   const [statusesRes, ordersRes, clientsRes, productsRes, warehousesRes, printOptsRes] =
     await Promise.all([
       supabase
@@ -86,11 +104,7 @@ export default async function OrdersPage({
         .limit(15),
       supabase
         .from('products')
-        .select(
-          canViewCost
-            ? 'id, name, sale_price, cost_price, unit'
-            : 'id, name, sale_price, unit'
-        )
+        .select(prodCols)
         .eq('org_id', org.id)
         .eq('is_active', true)
         .order('name', { ascending: true })
@@ -144,6 +158,9 @@ export default async function OrdersPage({
       initialView={view === 'list' ? 'list' : 'kanban'}
       clients={clientsList}
       products={(productsRes.data || []) as unknown as ProductRecord[]}
+      productCategories={
+        (categoriesRes.data || []) as unknown as ProductCategoryRecord[]
+      }
       printOptions={
         (printOptsRes.data || []) as unknown as PrintOptionRecord[]
       }

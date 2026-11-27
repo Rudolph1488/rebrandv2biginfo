@@ -6,11 +6,13 @@ import { createClient } from '@/lib/supabase/client';
 import { compressMockupToWebp } from '@/lib/compressImage';
 import { calculateDtfNesting } from '@/lib/dtfCalculator';
 import type {
+  BrandingMode,
   ClientRecord,
   OrderRecord,
   OrderStatus,
   Organization,
   PrintOptionRecord,
+  ProductCategoryRecord,
   ProductRecord,
 } from '@/types/crm';
 import {
@@ -52,6 +54,8 @@ interface DraftItem {
   baseCost: number;
   unitPrice: number | '';
   unitCost: number;
+  brandingMode: BrandingMode;
+  apparelMethod: 'dtf' | 'embroidery';
   selectedOptionIds: string[];
   dtfZones: DtfZoneItem[];
   draftZone: string;
@@ -71,6 +75,8 @@ function emptyDraftItem(): DraftItem {
     baseCost: 0,
     unitPrice: 0,
     unitCost: 0,
+    brandingMode: 'none',
+    apparelMethod: 'dtf',
     selectedOptionIds: [],
     dtfZones: [],
     draftZone: 'Серце',
@@ -93,6 +99,7 @@ export default function OrdersClient({
   initialView = 'kanban',
   clients,
   products,
+  productCategories = [],
   printOptions = [],
   warehouses,
   canViewCost,
@@ -109,6 +116,7 @@ export default function OrdersClient({
   initialView?: 'kanban' | 'list';
   clients: ClientRecord[];
   products: ProductRecord[];
+  productCategories?: ProductCategoryRecord[];
   printOptions?: PrintOptionRecord[];
   warehouses: Array<{ id: string; name: string; is_default: boolean }>;
   canViewCost: boolean;
@@ -285,13 +293,22 @@ export default function OrdersClient({
 
     const timer = setTimeout(async () => {
       const supabase = createClient();
+      const prodCols = [
+        'id',
+        'org_id',
+        'name',
+        'sku',
+        'category',
+        ...(productCategories.length > 0 ? ['category_id'] : []),
+        'sale_price',
+        ...(canViewCost ? ['cost_price'] : []),
+        'unit',
+        'is_active',
+        'created_at',
+      ].join(', ');
       const { data } = await supabase
         .from('products')
-        .select(
-          canViewCost
-            ? 'id, org_id, name, sku, category, sale_price, cost_price, unit, is_active, created_at'
-            : 'id, org_id, name, sku, category, sale_price, unit, is_active, created_at'
-        )
+        .select(prodCols)
         .eq('org_id', org.id)
         .eq('is_active', true)
         .or(`name.ilike.%${q}%,sku.ilike.%${q}%`)
@@ -299,7 +316,7 @@ export default function OrdersClient({
       if (data) setProductSearchResults(data as unknown as ProductRecord[]);
     }, 180);
     return () => clearTimeout(timer);
-  }, [activeItemIdx, activeItemQuery, org.id, canViewCost]);
+  }, [activeItemIdx, activeItemQuery, org.id, canViewCost, productCategories.length]);
 
   function handleSelectClientObj(found: ClientRecord) {
     setClientId(found.id);
@@ -350,21 +367,29 @@ export default function OrdersClient({
     qtyOverride?: number
   ): DraftItem {
     const qty = Math.max(1, Number(qtyOverride ?? item.qty) || 1);
-    const chosen = printOptions.filter((o) => optionIds.includes(o.id));
+    const useDtf =
+      item.brandingMode === 'apparel' && item.apparelMethod === 'dtf';
+    const useOptions = item.brandingMode === 'apparel';
+
+    const chosen = useOptions
+      ? printOptions.filter((o) => optionIds.includes(o.id))
+      : [];
     const optPrice = chosen.reduce((s, o) => s + (Number(o.price) || 0), 0);
     const optCost = chosen.reduce((s, o) => s + (Number(o.cost_price) || 0), 0);
 
     let dtfCostPerUnit = 0;
     let dtfRecPricePerUnit = 0;
-    for (const z of zones) {
-      const calc = calculateDtfNesting({
-        widthCm: z.widthCm,
-        heightCm: z.heightCm,
-        qty,
-        settings: org.dtf_settings,
-      });
-      dtfCostPerUnit += calc.costPerUnit;
-      dtfRecPricePerUnit += calc.recommendedPricePerUnit;
+    if (useDtf) {
+      for (const z of zones) {
+        const calc = calculateDtfNesting({
+          widthCm: z.widthCm,
+          heightCm: z.heightCm,
+          qty,
+          settings: org.dtf_settings,
+        });
+        dtfCostPerUnit += calc.costPerUnit;
+        dtfRecPricePerUnit += calc.recommendedPricePerUnit;
+      }
     }
 
     return {
@@ -377,6 +402,20 @@ export default function OrdersClient({
       ),
       unitCost: Number((item.baseCost + optCost + dtfCostPerUnit).toFixed(2)),
     };
+  }
+
+  function resolveBrandingMode(prod: ProductRecord): BrandingMode {
+    if (prod.category_id) {
+      const cat = productCategories.find((c) => c.id === prod.category_id);
+      if (cat) return cat.branding_mode;
+    }
+    if (prod.category) {
+      const cat = productCategories.find(
+        (c) => c.name.toLowerCase() === prod.category!.toLowerCase()
+      );
+      if (cat) return cat.branding_mode;
+    }
+    return 'none';
   }
 
   function handleAddDtfZone(idx: number) {
@@ -409,18 +448,38 @@ export default function OrdersClient({
     const next = [...items];
     const basePrice = Number(prod.sale_price) || 0;
     const baseCost = Number(prod.cost_price ?? 0) || 0;
+    const mode = resolveBrandingMode(prod);
+    const prev = next[idx];
+    const keepApparel = mode === 'apparel';
     next[idx] = recalcItemWithOptions(
       {
-        ...next[idx],
+        ...prev,
         productId: prod.id,
         name: prod.name,
         basePrice,
         baseCost,
+        brandingMode: mode,
+        apparelMethod: keepApparel ? prev.apparelMethod : 'dtf',
       },
-      next[idx].selectedOptionIds
+      keepApparel ? prev.selectedOptionIds : [],
+      keepApparel ? prev.dtfZones : []
     );
     setItems(next);
     setActiveItemIdx(null);
+  }
+
+  function handleApparelMethodChange(
+    idx: number,
+    method: 'dtf' | 'embroidery'
+  ) {
+    const next = [...items];
+    const curr = next[idx];
+    next[idx] = recalcItemWithOptions(
+      { ...curr, apparelMethod: method },
+      curr.selectedOptionIds,
+      curr.dtfZones
+    );
+    setItems(next);
   }
 
   function togglePrintOption(idx: number, optId: string) {
@@ -506,12 +565,24 @@ export default function OrdersClient({
             const attrs: Record<string, string> = {};
             if (i.color.trim()) attrs['Колір'] = i.color.trim();
             if (i.size.trim()) attrs['Розмір'] = i.size.trim();
-            const chosenNames = printOptions
-              .filter((o) => i.selectedOptionIds.includes(o.id))
-              .map((o) => o.name);
-            const dtfNames = i.dtfZones.map(
-              (z) => `${z.zone} (${z.widthCm}×${z.heightCm} см)`
-            );
+            if (i.brandingMode === 'apparel') {
+              attrs['Спосіб'] =
+                i.apparelMethod === 'dtf' ? 'DTF-друк' : 'Вишивка';
+            } else if (i.brandingMode === 'sublimation') {
+              attrs['Спосіб'] = 'Сублімація';
+            }
+            const chosenNames =
+              i.brandingMode === 'apparel'
+                ? printOptions
+                    .filter((o) => i.selectedOptionIds.includes(o.id))
+                    .map((o) => o.name)
+                : [];
+            const dtfNames =
+              i.brandingMode === 'apparel' && i.apparelMethod === 'dtf'
+                ? i.dtfZones.map(
+                    (z) => `${z.zone} (${z.widthCm}×${z.heightCm} см)`
+                  )
+                : [];
             const allPrint = [...dtfNames, ...chosenNames];
             if (allPrint.length > 0) {
               attrs['Нанесення'] = allPrint.join(', ');
@@ -1502,137 +1573,218 @@ export default function OrdersClient({
                         <Trash2 className="h-4 w-4" />
                       </button>
 
-                      {/* Print / Branding Constructor + Color / Size / Compressed Mockup */}
+                      {/* Print / Branding Constructor + Compressed Mockup */}
                       <div className="col-span-12 space-y-2 pt-1">
-                        {/* DTF Roll Calculator Zone Builder */}
-                        <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-indigo-200/70 bg-indigo-50/40 p-2 dark:border-indigo-500/20 dark:bg-indigo-500/5">
-                          <select
-                            value={item.draftZone}
-                            onChange={(e) => {
-                              const next = [...items];
-                              next[idx] = { ...item, draftZone: e.target.value };
-                              setItems(next);
-                            }}
-                            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium dark:border-white/10 dark:bg-[#131722] dark:text-white"
-                          >
-                            {STANDARD_PRINT_ZONES.map((z) => (
-                              <option key={z} value={z}>
-                                {z}
-                              </option>
-                            ))}
-                          </select>
-                          <div className="flex items-center gap-1 text-[11px] text-slate-500">
-                            <input
-                              type="number"
-                              min="1"
-                              value={item.draftW}
-                              onChange={(e) => {
-                                const raw = e.target.value;
-                                const next = [...items];
-                                next[idx] = {
-                                  ...item,
-                                  draftW: raw === '' ? '' : Number(raw),
-                                };
-                                setItems(next);
-                              }}
-                              onBlur={() => {
-                                if (item.draftW === '') {
-                                  const next = [...items];
-                                  next[idx] = { ...item, draftW: 10 };
-                                  setItems(next);
+                        {item.brandingMode === 'apparel' && (
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="inline-flex rounded-lg bg-slate-100 p-0.5 dark:bg-white/10">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleApparelMethodChange(idx, 'dtf')
                                 }
-                              }}
-                              className="w-12 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-center text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white"
-                              title="Ширина (см)"
-                            />
-                            <span>×</span>
-                            <input
-                              type="number"
-                              min="1"
-                              value={item.draftH}
-                              onChange={(e) => {
-                                const raw = e.target.value;
-                                const next = [...items];
-                                next[idx] = {
-                                  ...item,
-                                  draftH: raw === '' ? '' : Number(raw),
-                                };
-                                setItems(next);
-                              }}
-                              onBlur={() => {
-                                if (item.draftH === '') {
-                                  const next = [...items];
-                                  next[idx] = { ...item, draftH: 10 };
-                                  setItems(next);
-                                }
-                              }}
-                              className="w-12 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-center text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white"
-                              title="Висота (см)"
-                            />
-                            <span>см</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleAddDtfZone(idx)}
-                            className="rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700"
-                          >
-                            + Зона DTF
-                          </button>
-
-                          {item.dtfZones.map((z, zIdx) => {
-                            const calc = calculateDtfNesting({
-                              widthCm: z.widthCm,
-                              heightCm: z.heightCm,
-                              qty: Number(item.qty) || 1,
-                              settings: org.dtf_settings,
-                            });
-                            return (
-                              <span
-                                key={zIdx}
-                                className="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-0.5 text-[11px] font-semibold text-indigo-700 shadow-2xs dark:bg-[#131722] dark:text-indigo-300"
+                                className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                                  item.apparelMethod === 'dtf'
+                                    ? 'bg-indigo-600 text-white shadow-2xs'
+                                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                                }`}
                               >
-                                {z.zone} ({z.widthCm}×{z.heightCm}см •{' '}
-                                {calc.meters}м
-                                {canViewCost
-                                  ? ` • собів. +${calc.costPerUnit.toFixed(1)}${currencySymbol}`
-                                  : ''}
-                                )
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveDtfZone(idx, zIdx)}
-                                  className="text-slate-400 hover:text-red-500"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </span>
-                            );
-                          })}
-                        </div>
-
-                        {printOptions.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
-                            {printOptions.map((opt) => {
-                              const active = item.selectedOptionIds.includes(
-                                opt.id
-                              );
-                              return (
-                                <button
-                                  key={opt.id}
-                                  type="button"
-                                  onClick={() => togglePrintOption(idx, opt.id)}
-                                  className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${
-                                    active
-                                      ? 'border-indigo-600 bg-indigo-600 text-white'
-                                      : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 dark:border-white/10 dark:bg-white/5 dark:text-slate-300'
-                                  }`}
-                                >
-                                  {opt.name} (+{Number(opt.price).toFixed(0)}
-                                  {currencySymbol})
-                                </button>
-                              );
-                            })}
+                                DTF-друк (рулон)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleApparelMethodChange(idx, 'embroidery')
+                                }
+                                className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                                  item.apparelMethod === 'embroidery'
+                                    ? 'bg-indigo-600 text-white shadow-2xs'
+                                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                                }`}
+                              >
+                                Вишивка
+                              </button>
+                            </div>
+                            <span className="text-[10px] font-medium text-slate-400">
+                              Категорія: Одяг
+                            </span>
                           </div>
                         )}
+
+                        {item.brandingMode === 'sublimation' && (
+                          <div className="flex items-center justify-between rounded-xl border border-amber-200/80 bg-amber-50/50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+                            <span className="font-semibold">
+                              Сублімація • Без зон — прикріпіть візуалку/макет
+                            </span>
+                            <span className="text-[10px] opacity-80">
+                              Ціна та собів. з номенклатури
+                            </span>
+                          </div>
+                        )}
+
+                        {item.brandingMode === 'none' && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] text-slate-400">
+                              Звичайна позиція (або оберіть товар з категорії)
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = [...items];
+                                next[idx] = {
+                                  ...item,
+                                  brandingMode: 'apparel',
+                                };
+                                setItems(next);
+                              }}
+                              className="text-[11px] font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
+                            >
+                              + Увімкнути DTF / Вишивку
+                            </button>
+                          </div>
+                        )}
+
+                        {/* DTF Roll Calculator Zone Builder (only for apparel + dtf) */}
+                        {item.brandingMode === 'apparel' &&
+                          item.apparelMethod === 'dtf' && (
+                            <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-indigo-200/70 bg-indigo-50/40 p-2 dark:border-indigo-500/20 dark:bg-indigo-500/5">
+                              <select
+                                value={item.draftZone}
+                                onChange={(e) => {
+                                  const next = [...items];
+                                  next[idx] = {
+                                    ...item,
+                                    draftZone: e.target.value,
+                                  };
+                                  setItems(next);
+                                }}
+                                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium dark:border-white/10 dark:bg-[#131722] dark:text-white"
+                              >
+                                {STANDARD_PRINT_ZONES.map((z) => (
+                                  <option key={z} value={z}>
+                                    {z}
+                                  </option>
+                                ))}
+                              </select>
+                              <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={item.draftW}
+                                  onChange={(e) => {
+                                    const raw = e.target.value;
+                                    const next = [...items];
+                                    next[idx] = {
+                                      ...item,
+                                      draftW: raw === '' ? '' : Number(raw),
+                                    };
+                                    setItems(next);
+                                  }}
+                                  onBlur={() => {
+                                    if (item.draftW === '') {
+                                      const next = [...items];
+                                      next[idx] = { ...item, draftW: 10 };
+                                      setItems(next);
+                                    }
+                                  }}
+                                  className="w-12 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-center text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white"
+                                  title="Ширина (см)"
+                                />
+                                <span>×</span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={item.draftH}
+                                  onChange={(e) => {
+                                    const raw = e.target.value;
+                                    const next = [...items];
+                                    next[idx] = {
+                                      ...item,
+                                      draftH: raw === '' ? '' : Number(raw),
+                                    };
+                                    setItems(next);
+                                  }}
+                                  onBlur={() => {
+                                    if (item.draftH === '') {
+                                      const next = [...items];
+                                      next[idx] = { ...item, draftH: 10 };
+                                      setItems(next);
+                                    }
+                                  }}
+                                  className="w-12 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-center text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white"
+                                  title="Висота (см)"
+                                />
+                                <span>см</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleAddDtfZone(idx)}
+                                className="rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700"
+                              >
+                                + Зона DTF
+                              </button>
+
+                              {item.dtfZones.map((z, zIdx) => {
+                                const calc = calculateDtfNesting({
+                                  widthCm: z.widthCm,
+                                  heightCm: z.heightCm,
+                                  qty: Number(item.qty) || 1,
+                                  settings: org.dtf_settings,
+                                });
+                                return (
+                                  <span
+                                    key={zIdx}
+                                    className="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-0.5 text-[11px] font-semibold text-indigo-700 shadow-2xs dark:bg-[#131722] dark:text-indigo-300"
+                                  >
+                                    {z.zone} ({z.widthCm}×{z.heightCm}см •{' '}
+                                    {calc.meters}м
+                                    {canViewCost
+                                      ? ` • собів. +${calc.costPerUnit.toFixed(1)}${currencySymbol}`
+                                      : ''}
+                                    )
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleRemoveDtfZone(idx, zIdx)
+                                      }
+                                      className="text-slate-400 hover:text-red-500"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                        {/* Fixed Print / Embroidery Options (for apparel) */}
+                        {item.brandingMode === 'apparel' &&
+                          printOptions.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {printOptions.map((opt) => {
+                                const active = item.selectedOptionIds.includes(
+                                  opt.id
+                                );
+                                return (
+                                  <button
+                                    key={opt.id}
+                                    type="button"
+                                    onClick={() =>
+                                      togglePrintOption(idx, opt.id)
+                                    }
+                                    className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${
+                                      active
+                                        ? 'border-indigo-600 bg-indigo-600 text-white'
+                                        : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 dark:border-white/10 dark:bg-white/5 dark:text-slate-300'
+                                    }`}
+                                  >
+                                    {opt.name} (+{Number(opt.price).toFixed(0)}
+                                    {currencySymbol})
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
 
                         <div className="grid grid-cols-12 gap-1.5">
                           <input
@@ -1678,9 +1830,12 @@ export default function OrdersClient({
                               itemRevenue > 0
                                 ? Math.round((itemMargin / itemRevenue) * 100)
                                 : 0;
-                            const chosenOpts = printOptions.filter((o) =>
-                              item.selectedOptionIds.includes(o.id)
-                            );
+                            const chosenOpts =
+                              item.brandingMode === 'apparel'
+                                ? printOptions.filter((o) =>
+                                    item.selectedOptionIds.includes(o.id)
+                                  )
+                                : [];
                             const baseMargin =
                               (item.basePrice - item.baseCost) * qty;
 
@@ -1729,7 +1884,9 @@ export default function OrdersClient({
                                   </div>
                                 )}
 
-                                {item.dtfZones.map((z, zIdx) => {
+                                {item.brandingMode === 'apparel' &&
+                                  item.apparelMethod === 'dtf' &&
+                                  item.dtfZones.map((z, zIdx) => {
                                   const calc = calculateDtfNesting({
                                     widthCm: z.widthCm,
                                     heightCm: z.heightCm,
