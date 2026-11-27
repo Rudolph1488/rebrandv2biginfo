@@ -47,16 +47,16 @@ const STANDARD_PRINT_ZONES = [
 interface DraftItem {
   productId: string;
   name: string;
-  qty: number;
+  qty: number | '';
   basePrice: number;
   baseCost: number;
-  unitPrice: number;
+  unitPrice: number | '';
   unitCost: number;
   selectedOptionIds: string[];
   dtfZones: DtfZoneItem[];
   draftZone: string;
-  draftW: number;
-  draftH: number;
+  draftW: number | '';
+  draftH: number | '';
   color: string;
   size: string;
   mockupUrl: string;
@@ -349,7 +349,7 @@ export default function OrdersClient({
     zones: DtfZoneItem[] = item.dtfZones,
     qtyOverride?: number
   ): DraftItem {
-    const qty = Math.max(1, qtyOverride ?? item.qty);
+    const qty = Math.max(1, Number(qtyOverride ?? item.qty) || 1);
     const chosen = printOptions.filter((o) => optionIds.includes(o.id));
     const optPrice = chosen.reduce((s, o) => s + (Number(o.price) || 0), 0);
     const optCost = chosen.reduce((s, o) => s + (Number(o.cost_price) || 0), 0);
@@ -1430,19 +1430,31 @@ export default function OrdersClient({
                         step="1"
                         value={item.qty}
                         onChange={(e) => {
+                          const raw = e.target.value;
                           const next = [...items];
-                          const nextQty = Math.max(1, Number(e.target.value) || 1);
-                          next[idx] =
-                            item.dtfZones.length > 0 ||
-                            item.selectedOptionIds.length > 0
-                              ? recalcItemWithOptions(
-                                  item,
-                                  item.selectedOptionIds,
-                                  item.dtfZones,
-                                  nextQty
-                                )
-                              : { ...item, qty: Number(e.target.value) };
+                          if (raw === '') {
+                            next[idx] = { ...item, qty: '' };
+                          } else {
+                            const nextQty = Math.max(1, Number(raw) || 1);
+                            next[idx] =
+                              item.dtfZones.length > 0 ||
+                              item.selectedOptionIds.length > 0
+                                ? recalcItemWithOptions(
+                                    item,
+                                    item.selectedOptionIds,
+                                    item.dtfZones,
+                                    nextQty
+                                  )
+                                : { ...item, qty: nextQty };
+                          }
                           setItems(next);
+                        }}
+                        onBlur={() => {
+                          if (item.qty === '' || Number(item.qty) < 1) {
+                            const next = [...items];
+                            next[idx] = { ...item, qty: 1 };
+                            setItems(next);
+                          }
                         }}
                         placeholder="К-ть"
                         className="col-span-5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white sm:col-span-2"
@@ -1453,12 +1465,20 @@ export default function OrdersClient({
                         step="0.01"
                         value={item.unitPrice}
                         onChange={(e) => {
+                          const raw = e.target.value;
                           const next = [...items];
                           next[idx] = {
                             ...item,
-                            unitPrice: Number(e.target.value),
+                            unitPrice: raw === '' ? '' : Number(raw),
                           };
                           setItems(next);
+                        }}
+                        onBlur={() => {
+                          if (item.unitPrice === '') {
+                            const next = [...items];
+                            next[idx] = { ...item, unitPrice: 0 };
+                            setItems(next);
+                          }
                         }}
                         placeholder="Ціна"
                         className="col-span-5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white sm:col-span-2"
@@ -1539,7 +1559,7 @@ export default function OrdersClient({
                             const calc = calculateDtfNesting({
                               widthCm: z.widthCm,
                               heightCm: z.heightCm,
-                              qty: item.qty || 1,
+                              qty: Number(item.qty) || 1,
                               settings: org.dtf_settings,
                             });
                             return (
@@ -1628,15 +1648,15 @@ export default function OrdersClient({
                               <strong className="font-mono text-slate-900 dark:text-white">
                                 {item.unitCost.toFixed(2)} {currencySymbol}/шт
                               </strong>
-                              {item.qty > 1 && (
+                              {item.qty && Number(item.qty) > 1 && (
                                 <span className="ml-1 text-slate-500">
-                                  (разом {(item.unitCost * item.qty).toFixed(0)} {currencySymbol})
+                                  (разом {(item.unitCost * Number(item.qty)).toFixed(0)} {currencySymbol})
                                 </span>
                               )}
                             </span>
                             <span className="font-semibold text-emerald-700 dark:text-emerald-400">
                               Маржа: +
-                              {((item.unitPrice - item.unitCost) * (item.qty || 1)).toFixed(0)}{' '}
+                              {(((Number(item.unitPrice) || 0) - item.unitCost) * (Number(item.qty) || 1)).toFixed(0)}{' '}
                               {currencySymbol}
                             </span>
                           </div>
