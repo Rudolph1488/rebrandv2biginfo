@@ -10,6 +10,8 @@ import type {
   WarehouseStockRecord,
 } from '@/types/crm';
 
+export const dynamic = 'force-dynamic';
+
 export default async function ProductsPage({
   params,
 }: {
@@ -97,6 +99,7 @@ export default async function ProductsPage({
       }
       printOptionsMigrationMissing={Boolean(optionsRes.error)}
       categoriesMigrationMissing={categoriesMigrationMissing}
+      categoriesError={categoriesRes.error?.message || null}
       printZonesMigrationMissing={Boolean(zonesRes.error)}
       canViewCost={canViewCost}
       canManage={isAdmin || permissions.products}

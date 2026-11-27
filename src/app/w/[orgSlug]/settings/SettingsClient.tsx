@@ -237,24 +237,29 @@ export default function SettingsClient({
     const updatedStatuses = [...statuses];
     for (let idx = 0; idx < updatedStatuses.length; idx++) {
       const s = updatedStatuses[idx];
-      const payload = {
-        name: s.name.trim() || `Етап ${idx + 1}`,
-        slug: `stage_${idx + 1}`,
-        color: s.color || '#64748b',
-        position: idx,
-        is_final: Boolean(s.is_final),
-      };
-
       if (s.id) {
         await supabase
           .from('order_statuses')
-          .update(payload)
+          .update({
+            name: s.name.trim() || `Етап ${idx + 1}`,
+            color: s.color || '#64748b',
+            position: idx,
+            is_final: Boolean(s.is_final),
+          })
           .eq('id', s.id)
           .eq('org_id', org.id);
       } else {
+        const uniqueSlug = `stage_${Date.now()}_${idx}`;
         const { data: inserted } = await supabase
           .from('order_statuses')
-          .insert({ org_id: org.id, ...payload })
+          .insert({
+            org_id: org.id,
+            name: s.name.trim() || `Етап ${idx + 1}`,
+            slug: uniqueSlug,
+            color: s.color || '#64748b',
+            position: idx,
+            is_final: Boolean(s.is_final),
+          })
           .select('id')
           .single();
         if (inserted) {

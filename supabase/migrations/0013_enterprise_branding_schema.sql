@@ -85,3 +85,5 @@ create policy "Permitted members can manage order item brandings"
     public.has_org_permission(org_id, 'orders')
     or public.has_org_permission(org_id, 'production')
   );
+
+notify pgrst, 'reload schema';

@@ -86,6 +86,7 @@ export default function ProductsClient({
   initialPrintZones = [],
   printOptionsMigrationMissing = false,
   categoriesMigrationMissing = false,
+  categoriesError = null,
   printZonesMigrationMissing = false,
   canViewCost,
   canManage,
@@ -98,6 +99,7 @@ export default function ProductsClient({
   initialPrintZones?: PrintZoneRecord[];
   printOptionsMigrationMissing?: boolean;
   categoriesMigrationMissing?: boolean;
+  categoriesError?: string | null;
   printZonesMigrationMissing?: boolean;
   canViewCost: boolean;
   canManage: boolean;
@@ -856,6 +858,11 @@ export default function ProductsClient({
                 0012_product_categories.sql
               </code>{' '}
               у Supabase → SQL Editor, щоб увімкнути папки категорій.
+              {categoriesError && (
+                <span className="mt-1 block font-mono text-xs opacity-80">
+                  Деталі: {categoriesError}
+                </span>
+              )}
             </div>
           )}
 

@@ -37,3 +37,5 @@ alter table public.products
 
 create index if not exists idx_products_category
   on public.products(category_id);
+
+notify pgrst, 'reload schema';
