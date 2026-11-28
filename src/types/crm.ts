@@ -226,3 +226,15 @@ export interface StockMovementRecord {
   warehouse?: { name: string } | null;
   target_warehouse?: { name: string } | null;
 }
+
+export interface AuditLogRecord {
+  id: string;
+  org_id: string;
+  user_id: string | null;
+  user_email: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}

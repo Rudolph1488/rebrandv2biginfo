@@ -107,7 +107,6 @@ export default function OrdersClient({
   productCategories = [],
   printOptions = [],
   printZones = [],
-  enterpriseBrandingReady = false,
   warehouses,
   canViewCost,
   openNew = false,
@@ -542,157 +541,131 @@ export default function OrdersClient({
   async function handleCreateOrder(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    const supabase = createClient();
+    setStatusError(null);
 
-    const { data: createdOrder, error } = await supabase
-      .from('orders')
-      .insert({
-        org_id: org.id,
-        status_id: statusId || statuses[0]?.id || null,
-        client_id: clientId || null,
-        warehouse_id: warehouseId || null,
-        source_name: 'CRM',
-        total_amount: totalAmount,
-        total_cost: totalCost,
-        ttn: ttn.trim() || null,
-        delivery_city: deliveryCity.trim() || null,
-        delivery_warehouse: deliveryWarehouse.trim() || null,
-        notes: notes.trim() || null,
-      })
-      .select(
-        'id, org_id, order_number, status_id, client_id, warehouse_id, stock_deducted, source_name, total_amount, total_cost, ttn, delivery_city, delivery_warehouse, notes, created_at, client:clients(id, contact_person, phone)'
-      )
-      .single();
+    const validItems = items.filter((i) => i.name.trim());
+    const itemsPayload = validItems.map((i) => {
+      const attrs: Record<string, string> = {};
+      if (i.color.trim()) attrs['Колір'] = i.color.trim();
+      if (i.size.trim()) attrs['Розмір'] = i.size.trim();
+      const method: BrandingMethod =
+        i.brandingMode === 'apparel'
+          ? i.apparelMethod
+          : i.brandingMode === 'sublimation'
+            ? 'sublimation'
+            : 'none';
+      if (method === 'dtf') attrs['Спосіб'] = 'DTF-друк';
+      else if (method === 'embroidery') attrs['Спосіб'] = 'Вишивка';
+      else if (method === 'sublimation') attrs['Спосіб'] = 'Сублімація';
 
-    if (!error && createdOrder) {
-      const validItems = items.filter((i) => i.name.trim());
-      if (validItems.length > 0) {
-        const { data: insertedItems } = await supabase
-          .from('order_items')
-          .insert(
-            validItems.map((i) => {
-              const attrs: Record<string, string> = {};
-              if (i.color.trim()) attrs['Колір'] = i.color.trim();
-              if (i.size.trim()) attrs['Розмір'] = i.size.trim();
-              const method: BrandingMethod =
-                i.brandingMode === 'apparel'
-                  ? i.apparelMethod
-                  : i.brandingMode === 'sublimation'
-                    ? 'sublimation'
-                    : 'none';
-              if (method === 'dtf') attrs['Спосіб'] = 'DTF-друк';
-              else if (method === 'embroidery') attrs['Спосіб'] = 'Вишивка';
-              else if (method === 'sublimation') attrs['Спосіб'] = 'Сублімація';
+      const chosenNames =
+        i.brandingMode === 'apparel'
+          ? printOptions
+              .filter((o) => i.selectedOptionIds.includes(o.id))
+              .map((o) => o.name)
+          : [];
+      const dtfNames =
+        method === 'dtf'
+          ? i.dtfZones.map((z) => `${z.zone} (${z.widthCm}×${z.heightCm} см)`)
+          : [];
+      const allPrint = [...dtfNames, ...chosenNames];
+      if (allPrint.length > 0) {
+        attrs['Нанесення'] = allPrint.join(', ');
+      }
+      if (i.mockupUrl.trim()) attrs['Макет'] = i.mockupUrl.trim();
 
-              const chosenNames =
-                i.brandingMode === 'apparel'
-                  ? printOptions
-                      .filter((o) => i.selectedOptionIds.includes(o.id))
-                      .map((o) => o.name)
-                  : [];
-              const dtfNames =
-                method === 'dtf'
-                  ? i.dtfZones.map(
-                      (z) => `${z.zone} (${z.widthCm}×${z.heightCm} см)`
-                    )
-                  : [];
-              const allPrint = [...dtfNames, ...chosenNames];
-              if (allPrint.length > 0) {
-                attrs['Нанесення'] = allPrint.join(', ');
-              }
-              if (i.mockupUrl.trim()) attrs['Макет'] = i.mockupUrl.trim();
+      const qty = Math.max(1, Number(i.qty) || 1);
+      const brandings: Array<Record<string, unknown>> = [];
 
-              return {
-                org_id: org.id,
-                order_id: createdOrder.id,
-                product_id: i.productId || null,
-                name: i.name.trim(),
-                qty: Number(i.qty) || 1,
-                unit_price: Number(i.unitPrice) || 0,
-                unit_cost: Number(i.unitCost) || 0,
-                attributes: attrs,
-                ...(enterpriseBrandingReady
-                  ? {
-                      branding_method: method,
-                      mockup_url: i.mockupUrl.trim() || null,
-                    }
-                  : {}),
-              };
-            })
-          )
-          .select('id');
-
-        if (enterpriseBrandingReady && insertedItems && insertedItems.length > 0) {
-          const brandingRows: Array<Record<string, unknown>> = [];
-          validItems.forEach((i, itemIdx) => {
-            const orderItemId = insertedItems[itemIdx]?.id;
-            if (!orderItemId) return;
-            const qty = Math.max(1, Number(i.qty) || 1);
-
-            if (i.brandingMode === 'apparel' && i.apparelMethod === 'dtf') {
-              for (const z of i.dtfZones) {
-                const calc = calculateDtfNesting({
-                  widthCm: z.widthCm,
-                  heightCm: z.heightCm,
-                  qty,
-                  settings: org.dtf_settings,
-                });
-                brandingRows.push({
-                  org_id: org.id,
-                  order_item_id: orderItemId,
-                  method: 'dtf',
-                  print_zone_id: z.printZoneId,
-                  print_option_id: null,
-                  zone_name: z.zone,
-                  width_cm: z.widthCm,
-                  height_cm: z.heightCm,
-                  roll_meters: calc.meters,
-                  film_cost_total: calc.filmCostTotal,
-                  press_cost_total: Number((calc.pressCostPerUnit * qty).toFixed(2)),
-                  unit_cost: calc.costPerUnit,
-                  unit_price: calc.recommendedPricePerUnit,
-                });
-              }
-            }
-
-            if (i.brandingMode === 'apparel') {
-              for (const optId of i.selectedOptionIds) {
-                const opt = printOptions.find((o) => o.id === optId);
-                if (!opt) continue;
-                brandingRows.push({
-                  org_id: org.id,
-                  order_item_id: orderItemId,
-                  method:
-                    i.apparelMethod === 'embroidery' ? 'embroidery' : 'dtf',
-                  print_zone_id: null,
-                  print_option_id: opt.id,
-                  zone_name: opt.name,
-                  unit_cost: Number(opt.cost_price) || 0,
-                  unit_price: Number(opt.price) || 0,
-                });
-              }
-            }
-
-            if (i.brandingMode === 'sublimation') {
-              brandingRows.push({
-                org_id: org.id,
-                order_item_id: orderItemId,
-                method: 'sublimation',
-                print_zone_id: null,
-                print_option_id: null,
-                zone_name: 'Сублімація (макет)',
-                unit_cost: i.baseCost,
-                unit_price: i.basePrice,
-              });
-            }
+      if (i.brandingMode === 'apparel' && i.apparelMethod === 'dtf') {
+        for (const z of i.dtfZones) {
+          const calc = calculateDtfNesting({
+            widthCm: z.widthCm,
+            heightCm: z.heightCm,
+            qty,
+            settings: org.dtf_settings,
           });
-
-          if (brandingRows.length > 0) {
-            await supabase.from('order_item_brandings').insert(brandingRows);
-          }
+          brandings.push({
+            method: 'dtf',
+            print_zone_id: z.printZoneId,
+            print_option_id: null,
+            zone_name: z.zone,
+            width_cm: z.widthCm,
+            height_cm: z.heightCm,
+            roll_meters: calc.meters,
+            film_cost_total: calc.filmCostTotal,
+            press_cost_total: Number((calc.pressCostPerUnit * qty).toFixed(2)),
+            unit_cost: calc.costPerUnit,
+            unit_price: calc.recommendedPricePerUnit,
+          });
         }
       }
 
+      if (i.brandingMode === 'apparel') {
+        for (const optId of i.selectedOptionIds) {
+          const opt = printOptions.find((o) => o.id === optId);
+          if (!opt) continue;
+          brandings.push({
+            method: i.apparelMethod === 'embroidery' ? 'embroidery' : 'dtf',
+            print_zone_id: null,
+            print_option_id: opt.id,
+            zone_name: opt.name,
+            unit_cost: Number(opt.cost_price) || 0,
+            unit_price: Number(opt.price) || 0,
+          });
+        }
+      }
+
+      if (i.brandingMode === 'sublimation') {
+        brandings.push({
+          method: 'sublimation',
+          print_zone_id: null,
+          print_option_id: null,
+          zone_name: 'Сублімація (макет)',
+          unit_cost: i.baseCost,
+          unit_price: i.basePrice,
+        });
+      }
+
+      return {
+        product_id: i.productId || null,
+        name: i.name.trim(),
+        qty,
+        unit_price: Number(i.unitPrice) || 0,
+        unit_cost: Number(i.unitCost) || 0,
+        attributes: attrs,
+        branding_method: method,
+        mockup_url: i.mockupUrl.trim() || null,
+        brandings,
+      };
+    });
+
+    const createRes = await fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orgId: org.id,
+        statusId: statusId || statuses[0]?.id || null,
+        clientId: clientId || null,
+        warehouseId: warehouseId || null,
+        sourceName: 'CRM',
+        totalAmount,
+        totalCost,
+        ttn: ttn.trim() || null,
+        deliveryCity: deliveryCity.trim() || null,
+        deliveryWarehouse: deliveryWarehouse.trim() || null,
+        notes: notes.trim() || null,
+        items: itemsPayload,
+      }),
+    });
+
+    const createData = await createRes.json();
+    const createdOrder = createRes.ok ? createData.order : null;
+    if (!createRes.ok) {
+      setStatusError(createData.error || 'Не вдалося створити замовлення');
+    }
+
+    if (createdOrder) {
       // Check auto-deduct if initial status matches warehouse rule
       let finalDeducted = false;
       if (warehouseId && statusId) {

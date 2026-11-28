@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getUserContext } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { sendOrgPushNotification } from '@/lib/push';
+import { recordAuditLog } from '@/lib/audit';
 
 export async function POST(request: Request) {
   const ctx = await getUserContext();
@@ -130,6 +131,20 @@ export async function POST(request: Request) {
     if (updErr) {
       return NextResponse.json({ error: updErr.message }, { status: 500 });
     }
+
+    await recordAuditLog({
+      orgId,
+      userId: ctx.user.id,
+      userEmail: ctx.user.email,
+      action: `production.${action}`,
+      entityType: 'order',
+      entityId: order.id,
+      metadata: {
+        order_number: order.order_number,
+        production_status: nextProductionStatus,
+        elapsed_seconds: nextElapsed,
+      },
+    });
 
     if (action === 'done') {
       await sendOrgPushNotification({

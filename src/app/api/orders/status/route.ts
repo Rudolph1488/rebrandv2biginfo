@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getUserContext } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { sendOrgPushNotification } from '@/lib/push';
+import { recordAuditLog } from '@/lib/audit';
 
 export async function POST(request: Request) {
   const ctx = await getUserContext();
@@ -127,6 +128,20 @@ export async function POST(request: Request) {
         updated_at: new Date().toISOString(),
       })
       .eq('id', order.id);
+
+    await recordAuditLog({
+      orgId,
+      userId: ctx.user.id,
+      userEmail: ctx.user.email,
+      action: deductedNow ? 'order.status_and_deduct' : 'order.status_changed',
+      entityType: 'order',
+      entityId: order.id,
+      metadata: {
+        order_number: order.order_number,
+        new_status_id: newStatusId,
+        deducted_now: deductedNow,
+      },
+    });
 
     // Notify Production if order moved into the 2nd stage ("Підтверджено")
     const { data: orgStages } = await admin

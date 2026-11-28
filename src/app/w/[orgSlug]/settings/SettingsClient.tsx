@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import type {
+  AuditLogRecord,
   OrderStatus,
   Organization,
   OrgPermissions,
@@ -26,6 +27,7 @@ import {
   Bell,
   BellOff,
   BellRing,
+  History,
 } from 'lucide-react';
 
 interface MemberRow {
@@ -82,6 +84,8 @@ export default function SettingsClient({
   initialInvites,
   initialChannels,
   initialStatuses,
+  initialAuditLogs = [],
+  auditMigrationMissing = false,
 }: {
   org: Organization;
   isAdmin: boolean;
@@ -89,11 +93,13 @@ export default function SettingsClient({
   initialInvites: InviteRow[];
   initialChannels: ChannelRow[];
   initialStatuses: OrderStatus[];
+  initialAuditLogs?: AuditLogRecord[];
+  auditMigrationMissing?: boolean;
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<'brand' | 'kanban' | 'team' | 'integrations'>(
-    'brand'
-  );
+  const [tab, setTab] = useState<
+    'brand' | 'kanban' | 'team' | 'integrations' | 'audit'
+  >('brand');
 
   // Brand state
   const [orgName, setOrgName] = useState(org.name);
@@ -443,6 +449,19 @@ export default function SettingsClient({
             }`}
           >
             <Plug className="h-3.5 w-3.5" /> Інтеграції ({channels.length})
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setTab('audit')}
+            className={`inline-flex shrink-0 items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold transition ${
+              tab === 'audit'
+                ? 'border-slate-900 text-slate-900 dark:border-white dark:text-white'
+                : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400'
+            }`}
+          >
+            <History className="h-3.5 w-3.5" /> Аудит ({initialAuditLogs.length})
           </button>
         )}
       </div>
@@ -1016,6 +1035,73 @@ export default function SettingsClient({
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB 5: AUDIT LOGS */}
+      {tab === 'audit' && isAdmin && (
+        <div className="space-y-4">
+          {auditMigrationMissing && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+              Виконай SQL-міграцію{' '}
+              <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs dark:bg-amber-500/20">
+                0014_enterprise_audit_and_atomic_orders.sql
+              </code>{' '}
+              у Supabase → SQL Editor.
+            </div>
+          )}
+
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-2xs dark:border-white/10 dark:bg-[#0d1017]">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+              Журнал аудиту дій ({initialAuditLogs.length})
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              Останні 100 подій: створення замовлень, зміни статусів, автосписання та робота виробництва
+            </p>
+
+            {initialAuditLogs.length === 0 ? (
+              <p className="mt-6 text-center text-sm text-slate-400">
+                Подій поки немає.
+              </p>
+            ) : (
+              <div className="mt-4 divide-y divide-slate-100 dark:divide-white/10">
+                {initialAuditLogs.map((log) => {
+                  const orderNum = log.metadata?.order_number;
+                  const actionLabel: Record<string, string> = {
+                    'order.created': 'Створено замовлення',
+                    'order.status_changed': 'Змінено статус замовлення',
+                    'order.status_and_deduct': 'Статус + списано зі складу',
+                    'production.start': 'Виробництво: взято в роботу',
+                    'production.pause': 'Виробництво: пауза таймера',
+                    'production.resume': 'Виробництво: відновлено роботу',
+                    'production.done': 'Виробництво: завершено',
+                    'production.reopen': 'Виробництво: повернуто в роботу',
+                  };
+                  return (
+                    <div
+                      key={log.id}
+                      className="flex flex-col justify-between gap-1 py-3 text-xs sm:flex-row sm:items-center"
+                    >
+                      <div>
+                        <p className="font-semibold text-slate-900 dark:text-white">
+                          {actionLabel[log.action] || log.action}
+                          {orderNum ? ` #${String(orderNum)}` : ''}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                          {log.user_email || 'Система'}
+                          {log.metadata?.total_amount !== undefined &&
+                            ` • Сума: ${String(log.metadata.total_amount)}`}
+                        </p>
+                      </div>
+                      <span className="font-mono text-[11px] text-slate-400">
+                        {new Date(log.created_at).toLocaleString('uk-UA')}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

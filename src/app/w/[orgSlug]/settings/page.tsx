@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { requireOrgAccess } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import SettingsClient from './SettingsClient';
-import type { OrderStatus } from '@/types/crm';
+import type { AuditLogRecord, OrderStatus } from '@/types/crm';
 
 export default async function SettingsPage({
   params,
@@ -18,7 +18,7 @@ export default async function SettingsPage({
 
   const supabase = await createClient();
 
-  const [membersRes, pushSubsRes, invitesRes, channelsRes, statusesRes] =
+  const [membersRes, pushSubsRes, invitesRes, channelsRes, statusesRes, auditRes] =
     await Promise.all([
       supabase
         .from('organization_members')
@@ -50,6 +50,14 @@ export default async function SettingsPage({
         .select('*')
         .eq('org_id', org.id)
         .order('position', { ascending: true }),
+      isAdmin
+        ? supabase
+            .from('audit_logs')
+            .select('id, org_id, user_id, user_email, action, entity_type, entity_id, metadata, created_at')
+            .eq('org_id', org.id)
+            .order('created_at', { ascending: false })
+            .limit(100)
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
   let membersData = membersRes.data;
@@ -86,6 +94,10 @@ export default async function SettingsPage({
       initialInvites={invitesRes.data || []}
       initialChannels={channelsRes.data || []}
       initialStatuses={(statusesRes.data || []) as OrderStatus[]}
+      initialAuditLogs={
+        (auditRes.data || []) as unknown as AuditLogRecord[]
+      }
+      auditMigrationMissing={Boolean(auditRes.error)}
     />
   );
 }
