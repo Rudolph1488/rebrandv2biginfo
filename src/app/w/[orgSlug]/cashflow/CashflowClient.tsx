@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { recordClientAuditLog } from '@/lib/clientAudit';
 import type { CashflowRecord, Organization } from '@/types/crm';
 import { ArrowDownLeft, ArrowUpRight, Plus, X, Loader2 } from 'lucide-react';
 
@@ -52,6 +53,16 @@ export default function CashflowClient({
       .single();
 
     if (!error && data) {
+      await recordClientAuditLog({
+        orgId: org.id,
+        action: `cashflow.${type}`,
+        entityType: 'cashflow_transaction',
+        entityId: (data as CashflowRecord).id,
+        metadata: {
+          amount: Number(amount) || 0,
+          category: category.trim() || 'Інше',
+        },
+      });
       setItems([data as CashflowRecord, ...items]);
       setModalOpen(false);
       setAmount('');

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getUserContext } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { recordAuditLog } from '@/lib/audit';
 
 export async function POST(request: Request) {
   const ctx = await getUserContext();
@@ -153,6 +154,21 @@ export async function POST(request: Request) {
     if (movErr) {
       return NextResponse.json({ error: movErr.message }, { status: 500 });
     }
+
+    await recordAuditLog({
+      orgId,
+      userId: ctx.user.id,
+      userEmail: ctx.user.email,
+      action: `warehouse.${type}`,
+      entityType: 'stock_movement',
+      entityId: movement?.id ?? null,
+      metadata: {
+        warehouse_id: warehouseId,
+        target_warehouse_id: targetWarehouseId || null,
+        product_id: productId,
+        quantity: qty,
+      },
+    });
 
     return NextResponse.json({ ok: true, movement });
   } catch (err) {

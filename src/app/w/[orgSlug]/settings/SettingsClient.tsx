@@ -1069,6 +1069,7 @@ export default function SettingsClient({
                   const orderNum = log.metadata?.order_number;
                   const actionLabel: Record<string, string> = {
                     'order.created': 'Створено замовлення',
+                    'order.updated': 'Оновлено замовлення',
                     'order.status_changed': 'Змінено статус замовлення',
                     'order.status_and_deduct': 'Статус + списано зі складу',
                     'production.start': 'Виробництво: взято в роботу',
@@ -1076,6 +1077,13 @@ export default function SettingsClient({
                     'production.resume': 'Виробництво: відновлено роботу',
                     'production.done': 'Виробництво: завершено',
                     'production.reopen': 'Виробництво: повернуто в роботу',
+                    'warehouse.receipt': 'Склад: прихід товару',
+                    'warehouse.write_off': 'Склад: списання',
+                    'warehouse.transfer': 'Склад: переміщення',
+                    'warehouse.adjustment': 'Склад: інвентаризація',
+                    'warehouse.supply': 'Склад: прийомка від постачальника',
+                    'cashflow.income': 'Каса: надходження',
+                    'cashflow.expense': 'Каса: витрата',
                   };
                   return (
                     <div

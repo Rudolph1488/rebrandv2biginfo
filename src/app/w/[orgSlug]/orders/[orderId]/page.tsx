@@ -7,6 +7,9 @@ import type {
   OrderItemBrandingRecord,
   OrderRecord,
   OrderStatus,
+  PrintOptionRecord,
+  PrintZoneRecord,
+  ProductCategoryRecord,
   ProductRecord,
 } from '@/types/crm';
 
@@ -26,7 +29,7 @@ export default async function OrderDetailPage({
   const canCashflow = isAdmin || permissions.cashflow;
   const supabase = await createClient();
 
-  const [orderRes, itemsRes, statusesRes, productsRes, warehousesRes, cashRes] =
+  const [orderRes, itemsRes, statusesRes, productsRes, warehousesRes, cashRes, categoriesRes, printOptsRes, printZonesRes] =
     await Promise.all([
       supabase
         .from('orders')
@@ -51,8 +54,8 @@ export default async function OrderDetailPage({
         .from('products')
         .select(
           canViewCost
-            ? 'id, name, sale_price, cost_price, unit'
-            : 'id, name, sale_price, unit'
+            ? 'id, name, category_id, sale_price, cost_price, unit'
+            : 'id, name, category_id, sale_price, unit'
         )
         .eq('org_id', org.id)
         .eq('is_active', true)
@@ -70,6 +73,29 @@ export default async function OrderDetailPage({
         .eq('org_id', org.id)
         .eq('order_id', orderId)
         .order('occurred_at', { ascending: false }),
+      supabase
+        .from('product_categories')
+        .select('id, org_id, name, branding_mode, position, created_at')
+        .eq('org_id', org.id)
+        .order('position', { ascending: true }),
+      supabase
+        .from('print_options')
+        .select(
+          canViewCost
+            ? 'id, org_id, name, price, cost_price, is_active, position, created_at'
+            : 'id, org_id, name, price, is_active, position, created_at'
+        )
+        .eq('org_id', org.id)
+        .eq('is_active', true)
+        .order('position', { ascending: true }),
+      supabase
+        .from('print_zones')
+        .select(
+          'id, org_id, name, default_width_cm, default_height_cm, position, is_active, created_at'
+        )
+        .eq('org_id', org.id)
+        .eq('is_active', true)
+        .order('position', { ascending: true }),
     ]);
 
   if (!orderRes.data) {
@@ -104,6 +130,15 @@ export default async function OrderDetailPage({
       }
       statuses={(statusesRes.data || []) as OrderStatus[]}
       products={(productsRes.data || []) as unknown as ProductRecord[]}
+      productCategories={
+        (categoriesRes.data || []) as unknown as ProductCategoryRecord[]
+      }
+      printOptions={
+        (printOptsRes.data || []) as unknown as PrintOptionRecord[]
+      }
+      printZones={
+        (printZonesRes.data || []) as unknown as PrintZoneRecord[]
+      }
       warehouses={(warehousesRes.data || []) as Array<{ id: string; name: string; is_default: boolean }>}
       initialPayments={(cashRes.data || []) as CashflowRecord[]}
       canViewCost={canViewCost}

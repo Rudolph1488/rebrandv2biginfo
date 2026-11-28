@@ -4,12 +4,20 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { compressMockupToWebp } from '@/lib/compressImage';
+import { calculateDtfNesting } from '@/lib/dtfCalculator';
+import { recordClientAuditLog } from '@/lib/clientAudit';
 import type {
+  BrandingMethod,
+  BrandingMode,
   CashflowRecord,
   OrderItemBrandingRecord,
   OrderRecord,
   OrderStatus,
   Organization,
+  PrintOptionRecord,
+  PrintZoneRecord,
+  ProductCategoryRecord,
   ProductRecord,
 } from '@/types/crm';
 import {
@@ -26,16 +34,57 @@ import {
   ExternalLink,
   Search,
   CalendarDays,
+  ImagePlus,
+  X,
 } from 'lucide-react';
+
+interface DtfZoneDraft {
+  printZoneId: string | null;
+  zone: string;
+  widthCm: number;
+  heightCm: number;
+}
 
 interface ItemDraft {
   id?: string;
   product_id: string | null;
   name: string;
   qty: number;
+  base_price: number;
+  base_cost: number;
   unit_price: number;
   unit_cost: number;
+  brandingMode: BrandingMode;
+  apparelMethod: 'dtf' | 'embroidery';
+  dtfZones: DtfZoneDraft[];
+  selectedOptionIds: string[];
+  draftZoneId: string;
+  draftZone: string;
+  draftW: number | '';
+  draftH: number | '';
+  mockupUrl: string;
   attributes?: Record<string, string> | null;
+}
+
+function emptyDetailItem(firstZone?: PrintZoneRecord): ItemDraft {
+  return {
+    product_id: null,
+    name: '',
+    qty: 1,
+    base_price: 0,
+    base_cost: 0,
+    unit_price: 0,
+    unit_cost: 0,
+    brandingMode: 'none',
+    apparelMethod: 'dtf',
+    dtfZones: [],
+    selectedOptionIds: [],
+    draftZoneId: firstZone?.id || '',
+    draftZone: firstZone?.name || 'Серце',
+    draftW: firstZone ? Number(firstZone.default_width_cm) : 10,
+    draftH: firstZone ? Number(firstZone.default_height_cm) : 10,
+    mockupUrl: '',
+  };
 }
 
 export default function OrderDetailClient({
@@ -45,6 +94,9 @@ export default function OrderDetailClient({
   initialBrandings = [],
   statuses,
   products,
+  productCategories = [],
+  printOptions = [],
+  printZones = [],
   warehouses,
   initialPayments,
   canViewCost,
@@ -53,10 +105,21 @@ export default function OrderDetailClient({
 }: {
   org: Organization;
   initialOrder: OrderRecord;
-  initialItems: ItemDraft[];
+  initialItems: Array<{
+    id?: string;
+    product_id: string | null;
+    name: string;
+    qty: number;
+    unit_price: number;
+    unit_cost: number;
+    attributes?: Record<string, string> | null;
+  }>;
   initialBrandings?: OrderItemBrandingRecord[];
   statuses: OrderStatus[];
   products: ProductRecord[];
+  productCategories?: ProductCategoryRecord[];
+  printOptions?: PrintOptionRecord[];
+  printZones?: PrintZoneRecord[];
   warehouses: Array<{ id: string; name: string; is_default: boolean }>;
   initialPayments: CashflowRecord[];
   canViewCost: boolean;
@@ -65,6 +128,8 @@ export default function OrderDetailClient({
 }) {
   const router = useRouter();
   const [order, setOrder] = useState<OrderRecord>(initialOrder);
+  const [brandings, setBrandings] =
+    useState<OrderItemBrandingRecord[]>(initialBrandings);
   const [statusId, setStatusId] = useState(initialOrder.status_id || '');
   const [warehouseId, setWarehouseId] = useState(initialOrder.warehouse_id || '');
   const [ttn, setTtn] = useState(initialOrder.ttn || '');
@@ -77,11 +142,81 @@ export default function OrderDetailClient({
   const [notes, setNotes] = useState(initialOrder.notes || '');
   const [deadline, setDeadline] = useState(initialOrder.deadline || '');
   const [savingDeadline, setSavingDeadline] = useState(false);
-  const [items, setItems] = useState<ItemDraft[]>(
-    initialItems.length > 0
-      ? initialItems
-      : [{ product_id: null, name: '', qty: 1, unit_price: 0, unit_cost: 0 }]
+  const [uploadingMockupIdx, setUploadingMockupIdx] = useState<number | null>(
+    null
   );
+
+  const [items, setItems] = useState<ItemDraft[]>(() => {
+    if (initialItems.length === 0) return [emptyDetailItem(printZones[0])];
+    return initialItems.map((it) => {
+      const itemBrandings = it.id
+        ? initialBrandings.filter((b) => b.order_item_id === it.id)
+        : [];
+      const dtfZones: DtfZoneDraft[] = itemBrandings
+        .filter((b) => b.method === 'dtf' && !b.print_option_id)
+        .map((b) => ({
+          printZoneId: b.print_zone_id,
+          zone: b.zone_name,
+          widthCm: Number(b.width_cm) || 10,
+          heightCm: Number(b.height_cm) || 10,
+        }));
+      const selectedOptionIds = itemBrandings
+        .map((b) => b.print_option_id)
+        .filter((id): id is string => Boolean(id));
+
+      const matchedProd = it.product_id
+        ? products.find((p) => p.id === it.product_id)
+        : undefined;
+      const matchedCat = matchedProd?.category_id
+        ? productCategories.find((c) => c.id === matchedProd.category_id)
+        : undefined;
+
+      let brandingMode: BrandingMode = matchedCat?.branding_mode || 'none';
+      let apparelMethod: 'dtf' | 'embroidery' = 'dtf';
+
+      if (itemBrandings.some((b) => b.method === 'sublimation')) {
+        brandingMode = 'sublimation';
+      } else if (itemBrandings.some((b) => b.method === 'embroidery')) {
+        brandingMode = 'apparel';
+        apparelMethod = 'embroidery';
+      } else if (itemBrandings.some((b) => b.method === 'dtf')) {
+        brandingMode = 'apparel';
+        apparelMethod = 'dtf';
+      }
+
+      const brandingPriceSum = itemBrandings
+        .filter((b) => b.method !== 'sublimation')
+        .reduce((s, b) => s + (Number(b.unit_price) || 0), 0);
+      const brandingCostSum = itemBrandings
+        .filter((b) => b.method !== 'sublimation')
+        .reduce((s, b) => s + (Number(b.unit_cost) || 0), 0);
+
+      const basePrice = matchedProd
+        ? Number(matchedProd.sale_price) || 0
+        : Math.max(0, Number(it.unit_price) - brandingPriceSum);
+      const baseCost = matchedProd
+        ? Number(matchedProd.cost_price ?? 0) || 0
+        : Math.max(0, Number(it.unit_cost) - brandingCostSum);
+
+      return {
+        ...emptyDetailItem(printZones[0]),
+        id: it.id,
+        product_id: it.product_id,
+        name: it.name,
+        qty: Number(it.qty) || 1,
+        base_price: basePrice,
+        base_cost: baseCost,
+        unit_price: Number(it.unit_price) || 0,
+        unit_cost: Number(it.unit_cost) || 0,
+        brandingMode,
+        apparelMethod,
+        dtfZones,
+        selectedOptionIds,
+        mockupUrl: it.attributes?.['Макет'] || '',
+        attributes: it.attributes,
+      };
+    });
+  });
   const [payments, setPayments] = useState<CashflowRecord[]>(initialPayments);
 
   const [saving, setSaving] = useState(false);
@@ -122,21 +257,97 @@ export default function OrderDetailClient({
     .reduce((sum, p) => sum + Number(p.amount || 0), 0);
   const remaining = Math.max(0, totalAmount - totalPaid);
 
+  function recalcDetailItem(
+    item: ItemDraft,
+    optionIds: string[] = item.selectedOptionIds,
+    zones: DtfZoneDraft[] = item.dtfZones,
+    qtyOverride?: number
+  ): ItemDraft {
+    const qty = Math.max(1, Number(qtyOverride ?? item.qty) || 1);
+    const useDtf =
+      item.brandingMode === 'apparel' && item.apparelMethod === 'dtf';
+    const useOpts = item.brandingMode === 'apparel';
+
+    const chosen = useOpts
+      ? printOptions.filter((o) => optionIds.includes(o.id))
+      : [];
+    const optPrice = chosen.reduce((s, o) => s + (Number(o.price) || 0), 0);
+    const optCost = chosen.reduce((s, o) => s + (Number(o.cost_price) || 0), 0);
+
+    let dtfCost = 0;
+    let dtfPrice = 0;
+    if (useDtf) {
+      for (const z of zones) {
+        const calc = calculateDtfNesting({
+          widthCm: z.widthCm,
+          heightCm: z.heightCm,
+          qty,
+          settings: org.dtf_settings,
+        });
+        dtfCost += calc.costPerUnit;
+        dtfPrice += calc.recommendedPricePerUnit;
+      }
+    }
+
+    return {
+      ...item,
+      qty,
+      selectedOptionIds: optionIds,
+      dtfZones: zones,
+      unit_price: Number((item.base_price + optPrice + dtfPrice).toFixed(2)),
+      unit_cost: Number((item.base_cost + optCost + dtfCost).toFixed(2)),
+    };
+  }
+
   function handleProductSelect(idx: number, prodId: string) {
     const prod = products.find((p) => p.id === prodId);
     const next = [...items];
+    const prev = next[idx];
     if (prod) {
-      next[idx] = {
-        ...next[idx],
-        product_id: prod.id,
-        name: prod.name,
-        unit_price: Number(prod.sale_price) || 0,
-        unit_cost: Number(prod.cost_price ?? 0) || 0,
-      };
+      const cat = prod.category_id
+        ? productCategories.find((c) => c.id === prod.category_id)
+        : undefined;
+      const mode: BrandingMode = cat?.branding_mode || 'none';
+      const keepApparel = mode === 'apparel';
+      next[idx] = recalcDetailItem(
+        {
+          ...prev,
+          product_id: prod.id,
+          name: prod.name,
+          base_price: Number(prod.sale_price) || 0,
+          base_cost: Number(prod.cost_price ?? 0) || 0,
+          brandingMode: mode,
+          apparelMethod: keepApparel ? prev.apparelMethod : 'dtf',
+        },
+        keepApparel ? prev.selectedOptionIds : [],
+        keepApparel ? prev.dtfZones : []
+      );
     } else {
-      next[idx] = { ...next[idx], product_id: null };
+      next[idx] = { ...prev, product_id: null };
     }
     setItems(next);
+  }
+
+  async function handleDetailMockupUpload(idx: number, file: File) {
+    setUploadingMockupIdx(idx);
+    try {
+      const compressed = await compressMockupToWebp(file);
+      const fd = new FormData();
+      fd.append('orgId', org.id);
+      fd.append('file', compressed);
+      const res = await fetch('/api/orders/mockup', {
+        method: 'POST',
+        body: fd,
+      });
+      const data = await res.json();
+      if (res.ok && data.url) {
+        const next = [...items];
+        next[idx] = { ...next[idx], mockupUrl: data.url };
+        setItems(next);
+      }
+    } finally {
+      setUploadingMockupIdx(null);
+    }
   }
 
   async function handleStatusChange(newStatusId: string) {
@@ -192,19 +403,156 @@ export default function OrderDetailClient({
 
     await supabase.from('order_items').delete().eq('order_id', order.id);
     const validItems = items.filter((i) => i.name.trim());
+    const nextBrandings: OrderItemBrandingRecord[] = [];
     if (validItems.length > 0) {
-      await supabase.from('order_items').insert(
-        validItems.map((i) => ({
-          org_id: org.id,
-          order_id: order.id,
-          product_id: i.product_id || null,
-          name: i.name.trim(),
-          qty: Number(i.qty) || 1,
-          unit_price: Number(i.unit_price) || 0,
-          unit_cost: Number(i.unit_cost) || 0,
-        }))
-      );
+      const { data: insertedItems } = await supabase
+        .from('order_items')
+        .insert(
+          validItems.map((i) => {
+            const attrs: Record<string, string> = {
+              ...(i.attributes || {}),
+            };
+            const method: BrandingMethod =
+              i.brandingMode === 'apparel'
+                ? i.apparelMethod
+                : i.brandingMode === 'sublimation'
+                  ? 'sublimation'
+                  : 'none';
+            if (method === 'dtf') attrs['Спосіб'] = 'DTF-друк';
+            else if (method === 'embroidery') attrs['Спосіб'] = 'Вишивка';
+            else if (method === 'sublimation') attrs['Спосіб'] = 'Сублімація';
+            else delete attrs['Спосіб'];
+
+            const chosenNames =
+              i.brandingMode === 'apparel'
+                ? printOptions
+                    .filter((o) => i.selectedOptionIds.includes(o.id))
+                    .map((o) => o.name)
+                : [];
+            const dtfNames =
+              method === 'dtf'
+                ? i.dtfZones.map((z) => `${z.zone} (${z.widthCm}×${z.heightCm} см)`)
+                : [];
+            const allPrint = [...dtfNames, ...chosenNames];
+            if (allPrint.length > 0) attrs['Нанесення'] = allPrint.join(', ');
+            else delete attrs['Нанесення'];
+
+            if (i.mockupUrl.trim()) attrs['Макет'] = i.mockupUrl.trim();
+            else delete attrs['Макет'];
+
+            return {
+              org_id: org.id,
+              order_id: order.id,
+              product_id: i.product_id || null,
+              name: i.name.trim(),
+              qty: Number(i.qty) || 1,
+              unit_price: Number(i.unit_price) || 0,
+              unit_cost: Number(i.unit_cost) || 0,
+              attributes: attrs,
+            };
+          })
+        )
+        .select('id, attributes');
+
+      if (insertedItems && insertedItems.length > 0) {
+        setItems(
+          validItems.map((it, idx) => ({
+            ...it,
+            id: insertedItems[idx]?.id ?? it.id,
+            attributes:
+              (insertedItems[idx]?.attributes as Record<string, string> | null) ??
+              it.attributes,
+          }))
+        );
+        const brandingRows: Array<Record<string, unknown>> = [];
+        validItems.forEach((i, itemIdx) => {
+          const orderItemId = insertedItems[itemIdx]?.id;
+          if (!orderItemId) return;
+          const qty = Math.max(1, Number(i.qty) || 1);
+
+          if (i.brandingMode === 'apparel' && i.apparelMethod === 'dtf') {
+            for (const z of i.dtfZones) {
+              const calc = calculateDtfNesting({
+                widthCm: z.widthCm,
+                heightCm: z.heightCm,
+                qty,
+                settings: org.dtf_settings,
+              });
+              brandingRows.push({
+                org_id: org.id,
+                order_item_id: orderItemId,
+                method: 'dtf',
+                print_zone_id: z.printZoneId,
+                print_option_id: null,
+                zone_name: z.zone,
+                width_cm: z.widthCm,
+                height_cm: z.heightCm,
+                roll_meters: calc.meters,
+                film_cost_total: calc.filmCostTotal,
+                press_cost_total: Number((calc.pressCostPerUnit * qty).toFixed(2)),
+                unit_cost: calc.costPerUnit,
+                unit_price: calc.recommendedPricePerUnit,
+              });
+            }
+          }
+
+          if (i.brandingMode === 'apparel') {
+            for (const optId of i.selectedOptionIds) {
+              const opt = printOptions.find((o) => o.id === optId);
+              if (!opt) continue;
+              brandingRows.push({
+                org_id: org.id,
+                order_item_id: orderItemId,
+                method: i.apparelMethod === 'embroidery' ? 'embroidery' : 'dtf',
+                print_zone_id: null,
+                print_option_id: opt.id,
+                zone_name: opt.name,
+                unit_cost: Number(opt.cost_price) || 0,
+                unit_price: Number(opt.price) || 0,
+              });
+            }
+          }
+
+          if (i.brandingMode === 'sublimation') {
+            brandingRows.push({
+              org_id: org.id,
+              order_item_id: orderItemId,
+              method: 'sublimation',
+              print_zone_id: null,
+              print_option_id: null,
+              zone_name: 'Сублімація (макет)',
+              unit_cost: i.base_cost,
+              unit_price: i.base_price,
+            });
+          }
+        });
+
+        if (brandingRows.length > 0) {
+          const { data: insertedBrandings } = await supabase
+            .from('order_item_brandings')
+            .insert(brandingRows)
+            .select('*');
+          if (insertedBrandings) {
+            nextBrandings.push(
+              ...(insertedBrandings as OrderItemBrandingRecord[])
+            );
+          }
+        }
+      }
     }
+
+    setBrandings(nextBrandings);
+    await recordClientAuditLog({
+      orgId: org.id,
+      action: 'order.updated',
+      entityType: 'order',
+      entityId: order.id,
+      metadata: {
+        order_number: order.order_number,
+        total_amount: totalAmount,
+        total_cost: totalCost,
+      },
+    });
 
     setSaving(false);
     setSavedMsg(true);
@@ -251,6 +599,17 @@ export default function OrderDetailClient({
       .single();
 
     if (!error && data) {
+      await recordClientAuditLog({
+        orgId: org.id,
+        action: 'cashflow.income',
+        entityType: 'cashflow_transaction',
+        entityId: (data as CashflowRecord).id,
+        metadata: {
+          order_number: order.order_number,
+          amount: remaining,
+          category: 'Оплата замовлення',
+        },
+      });
       setPayments([data as CashflowRecord, ...payments]);
       router.refresh();
     }
@@ -448,16 +807,7 @@ export default function OrderDetailClient({
                 <button
                   type="button"
                   onClick={() =>
-                    setItems([
-                      ...items,
-                      {
-                        product_id: null,
-                        name: '',
-                        qty: 1,
-                        unit_price: 0,
-                        unit_cost: 0,
-                      },
-                    ])
+                    setItems([...items, emptyDetailItem(printZones[0])])
                   }
                   className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
                 >
@@ -492,9 +842,7 @@ export default function OrderDetailClient({
                         )}
                       {(() => {
                         const itemBrandings = item.id
-                          ? initialBrandings.filter(
-                              (b) => b.order_item_id === item.id
-                            )
+                          ? brandings.filter((b) => b.order_item_id === item.id)
                           : [];
                         if (itemBrandings.length === 0) return null;
                         return (
@@ -571,8 +919,14 @@ export default function OrderDetailClient({
                       step="0.01"
                       value={item.qty}
                       onChange={(e) => {
+                        const q = Math.max(1, Number(e.target.value) || 1);
                         const next = [...items];
-                        next[idx] = { ...item, qty: Number(e.target.value) };
+                        next[idx] = recalcDetailItem(
+                          item,
+                          item.selectedOptionIds,
+                          item.dtfZones,
+                          q
+                        );
                         setItems(next);
                       }}
                       className="col-span-5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs dark:border-white/10 dark:bg-white/5 dark:text-white sm:col-span-2"
@@ -600,6 +954,266 @@ export default function OrderDetailClient({
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
+
+                    {/* Branding & Mockup Editor */}
+                    <div className="col-span-12 space-y-2 pt-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {(
+                          [
+                            { id: 'dtf', label: 'DTF-друк' },
+                            { id: 'embroidery', label: 'Вишивка' },
+                            { id: 'sublimation', label: 'Сублімація' },
+                            { id: 'none', label: 'Без брендування' },
+                          ] as const
+                        ).map((m) => {
+                          const active =
+                            (item.brandingMode === 'apparel' &&
+                              item.apparelMethod === m.id) ||
+                            (item.brandingMode === 'sublimation' &&
+                              m.id === 'sublimation') ||
+                            (item.brandingMode === 'none' && m.id === 'none');
+                          return (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => {
+                                const next = [...items];
+                                const updatedMode: BrandingMode =
+                                  m.id === 'dtf' || m.id === 'embroidery'
+                                    ? 'apparel'
+                                    : m.id;
+                                const updatedMethod =
+                                  m.id === 'embroidery' ? 'embroidery' : 'dtf';
+                                next[idx] = recalcDetailItem(
+                                  {
+                                    ...item,
+                                    brandingMode: updatedMode,
+                                    apparelMethod: updatedMethod,
+                                  },
+                                  updatedMode === 'apparel'
+                                    ? item.selectedOptionIds
+                                    : [],
+                                  updatedMode === 'apparel'
+                                    ? item.dtfZones
+                                    : []
+                                );
+                                setItems(next);
+                              }}
+                              className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${
+                                active
+                                  ? 'border-indigo-600 bg-indigo-600 text-white'
+                                  : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 dark:border-white/10 dark:bg-white/5 dark:text-slate-300'
+                              }`}
+                            >
+                              {m.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {item.brandingMode === 'apparel' &&
+                        item.apparelMethod === 'dtf' && (
+                          <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-indigo-200/70 bg-indigo-50/40 p-2 dark:border-indigo-500/20 dark:bg-indigo-500/5">
+                            {printZones.length > 0 ? (
+                              <select
+                                value={item.draftZoneId || printZones[0].id}
+                                onChange={(e) => {
+                                  const chosen = printZones.find(
+                                    (z) => z.id === e.target.value
+                                  );
+                                  const next = [...items];
+                                  next[idx] = {
+                                    ...item,
+                                    draftZoneId: chosen?.id || '',
+                                    draftZone: chosen?.name || item.draftZone,
+                                    draftW: chosen
+                                      ? Number(chosen.default_width_cm)
+                                      : item.draftW,
+                                    draftH: chosen
+                                      ? Number(chosen.default_height_cm)
+                                      : item.draftH,
+                                  };
+                                  setItems(next);
+                                }}
+                                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium dark:border-white/10 dark:bg-[#131722] dark:text-white"
+                              >
+                                {printZones.map((z) => (
+                                  <option key={z.id} value={z.id}>
+                                    {z.name}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <input
+                                value={item.draftZone}
+                                onChange={(e) => {
+                                  const next = [...items];
+                                  next[idx] = {
+                                    ...item,
+                                    draftZone: e.target.value,
+                                  };
+                                  setItems(next);
+                                }}
+                                placeholder="Зона"
+                                className="w-24 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white"
+                              />
+                            )}
+                            <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                              <input
+                                type="number"
+                                min="1"
+                                value={item.draftW}
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  const next = [...items];
+                                  next[idx] = {
+                                    ...item,
+                                    draftW: raw === '' ? '' : Number(raw),
+                                  };
+                                  setItems(next);
+                                }}
+                                className="w-12 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-center text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white"
+                              />
+                              <span>×</span>
+                              <input
+                                type="number"
+                                min="1"
+                                value={item.draftH}
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  const next = [...items];
+                                  next[idx] = {
+                                    ...item,
+                                    draftH: raw === '' ? '' : Number(raw),
+                                  };
+                                  setItems(next);
+                                }}
+                                className="w-12 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-center text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white"
+                              />
+                              <span>см</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const matched = item.draftZoneId
+                                  ? printZones.find(
+                                      (z) => z.id === item.draftZoneId
+                                    )
+                                  : printZones[0];
+                                const zone: DtfZoneDraft = {
+                                  printZoneId: matched?.id || null,
+                                  zone: matched?.name || item.draftZone || 'Зона',
+                                  widthCm: Math.max(1, Number(item.draftW) || 10),
+                                  heightCm: Math.max(
+                                    1,
+                                    Number(item.draftH) || 10
+                                  ),
+                                };
+                                const next = [...items];
+                                next[idx] = recalcDetailItem(
+                                  item,
+                                  item.selectedOptionIds,
+                                  [...item.dtfZones, zone]
+                                );
+                                setItems(next);
+                              }}
+                              className="rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700"
+                            >
+                              + Зона DTF
+                            </button>
+
+                            {item.dtfZones.map((z, zIdx) => (
+                              <span
+                                key={zIdx}
+                                className="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-0.5 text-[11px] font-semibold text-indigo-700 shadow-2xs dark:bg-[#131722] dark:text-indigo-300"
+                              >
+                                {z.zone} ({z.widthCm}×{z.heightCm}см)
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const next = [...items];
+                                    next[idx] = recalcDetailItem(
+                                      item,
+                                      item.selectedOptionIds,
+                                      item.dtfZones.filter((_, i) => i !== zIdx)
+                                    );
+                                    setItems(next);
+                                  }}
+                                  className="text-slate-400 hover:text-red-500"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                      {item.brandingMode === 'apparel' &&
+                        printOptions.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {printOptions.map((opt) => {
+                              const active = item.selectedOptionIds.includes(
+                                opt.id
+                              );
+                              return (
+                                <button
+                                  key={opt.id}
+                                  type="button"
+                                  onClick={() => {
+                                    const nextIds = active
+                                      ? item.selectedOptionIds.filter(
+                                          (id) => id !== opt.id
+                                        )
+                                      : [...item.selectedOptionIds, opt.id];
+                                    const next = [...items];
+                                    next[idx] = recalcDetailItem(item, nextIds);
+                                    setItems(next);
+                                  }}
+                                  className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${
+                                    active
+                                      ? 'border-indigo-600 bg-indigo-600 text-white'
+                                      : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 dark:border-white/10 dark:bg-white/5 dark:text-slate-300'
+                                  }`}
+                                >
+                                  {opt.name} (+{Number(opt.price).toFixed(0)}
+                                  {currencySymbol})
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                      <div className="grid grid-cols-12 gap-1.5">
+                        <input
+                          value={item.mockupUrl}
+                          onChange={(e) => {
+                            const next = [...items];
+                            next[idx] = { ...item, mockupUrl: e.target.value };
+                            setItems(next);
+                          }}
+                          placeholder="Лінк на макет або завантажте прев'ю →"
+                          className="col-span-8 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] dark:border-white/10 dark:bg-white/5 dark:text-white sm:col-span-9"
+                        />
+                        <label className="col-span-4 inline-flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-dashed border-indigo-300 bg-indigo-50/60 px-2 py-1.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300 sm:col-span-3">
+                          {uploadingMockupIdx === idx ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <ImagePlus className="h-3.5 w-3.5" />
+                          )}
+                          <span>{item.mockupUrl ? 'Оновити' : 'Макет'}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) handleDetailMockupUpload(idx, f);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>

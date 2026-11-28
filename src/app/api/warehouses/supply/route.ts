@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getUserContext } from '@/lib/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { recordAuditLog } from '@/lib/audit';
 
 interface SupplyItemInput {
   productId: string;
@@ -134,6 +135,22 @@ export async function POST(request: Request) {
         created_by: ctx.user.id,
       });
     }
+
+    await recordAuditLog({
+      orgId,
+      userId: ctx.user.id,
+      userEmail: ctx.user.email,
+      action: 'warehouse.supply',
+      entityType: 'supply_document',
+      entityId: supplyDoc.id,
+      metadata: {
+        doc_number: supplyDoc.doc_number,
+        supplier_name: supplierName.trim(),
+        total_amount: totalAmount,
+        items_count: validItems.length,
+        record_cashflow: Boolean(recordCashflow),
+      },
+    });
 
     return NextResponse.json({ ok: true, supplyDoc });
   } catch (err) {
